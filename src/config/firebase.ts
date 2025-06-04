@@ -4,7 +4,8 @@ import {
   getFirestore, 
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager
+  persistentMultipleTabManager,
+  CACHE_SIZE_UNLIMITED
 } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -13,16 +14,25 @@ const firebaseConfig = {
   projectId: "emotion-notepad-b9bcb",
   storageBucket: "emotion-notepad-b9bcb.firebasestorage.app",
   messagingSenderId: "817361000108",
-  appId: "1:817361000108:web:718c7375c7d5411290f109"
+  appId: "1:817361000108:web:718c7375c7d5411290f109",
+  cacheSizeBytes: CACHE_SIZE_UNLIMITED
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with persistent cache and multi-tab support
-export const db = initializeFirestore(app, {
+// Initialize Firestore with optimized settings
+const firestoreSettings = {
+  experimentalAutoDetectLongPolling: true,
+  useFetchStreams: false,
   cache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
+    tabManager: persistentMultipleTabManager(),
+    cacheSizeBytes: CACHE_SIZE_UNLIMITED
   })
-});
+};
 
+// Initialize Firestore with settings
+export const db = initializeFirestore(app, firestoreSettings);
+
+// Initialize Auth
 export const auth = getAuth(app); 

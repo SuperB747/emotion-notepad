@@ -3,7 +3,6 @@ import { db, auth } from '../../config/firebase';
 import { collection, query, orderBy, onSnapshot, deleteDoc, doc, updateDoc, addDoc, getDocs, writeBatch, where, serverTimestamp, setDoc, getDoc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion';
-import { LoadingButton } from '@mui/lab';
 import {
   Box,
   List,
@@ -28,6 +27,7 @@ import {
   Select,
   MenuItem,
   Menu,
+  CircularProgress,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -69,6 +69,7 @@ interface NotePosition {
   x: number;
   y: number;
   rotate: number;
+  zIndex?: number;
 }
 
 interface FolderLayout {
@@ -420,6 +421,19 @@ export const NoteList = () => {
   const [folderLayouts, setFolderLayouts] = useState<FolderLayout[]>([]);
   const [isLayoutSaving, setIsLayoutSaving] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [maxZIndex, setMaxZIndex] = useState(10);
+  const originalZIndexRef = React.useRef<Record<string, number>>({});
+  
+  // z-index 관련 상수 수정
+  const BASE_Z_INDEX = 10;
+  const Z_INDEX_GAP = 2; // 노트 간 z-index 간격을 2로 축소
+  const MAIN_NOTE_Z_INDEX = 95;
+  const HOVER_Z_INDEX = 100; // 호버 시 메인 노트보다 더 높게 설정
+  const Z_INDEX_THRESHOLD = 90;
+
+  // 드래그 관련 상수와 ref를 컴포넌트 최상위에 선언
+  const dragStartPosition = React.useRef({ x: 0, y: 0 });
+  const DRAG_THRESHOLD = 5;
 
   // Constants for layout calculations
   const MAX_ROTATION = 5; // 최대 회전 각도
@@ -438,6 +452,34 @@ export const NoteList = () => {
   const BACKGROUND_NOTE_HEIGHT = 220; // 배경 노트 높이
   const FRAME_WIDTH = 1200; // 노트 표시 프레임 너비
   const FRAME_HEIGHT = 750; // 노트 표시 프레임 높이
+
+  // 공통 스타일을 상수로 정의
+  const commonCardStyle = {
+    position: 'absolute',
+    top: 16,
+    bgcolor: 'rgba(255, 255, 255, 0.8)',
+    padding: '6px 16px', // 패딩 통일
+    borderRadius: '12px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    height: '36px', // 높이 통일
+    display: 'flex',
+    alignItems: 'center',
+    zIndex: 1000,
+    transition: 'all 0.2s',
+    '&:hover': {
+      bgcolor: 'rgba(255, 255, 255, 0.9)',
+      boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
+    }
+  };
+
+  const commonTypographyStyle = {
+    fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+    fontSize: '0.9rem', // 폰트 크기 통일
+    fontWeight: 600,
+    color: '#2c5530',
+    lineHeight: 1,
+    m: 0,
+  };
 
   // 로그아웃 처리
   const handleLogout = async () => {
@@ -512,45 +554,94 @@ export const NoteList = () => {
     return true;
   };
 
-  // 노트 선택 처리
+  // z-index 정규화 함수 추가
+  const normalizeZIndices = (positions: Record<string, NotePosition>): Record<string, NotePosition> => {
+    // z-index 값들을 추출하고 정렬
+    const zIndices = Object.values(positions)
+      .map(pos => pos.zIndex || 1)
+      .sort((a, b) => a - b);
+
+    // 최대 z-index가 임계값을 넘지 않으면 정규화하지 않음
+    if (Math.max(...zIndices) < Z_INDEX_THRESHOLD) {
+      return positions;
+    }
+
+    // 모든 z-index 값을 50만큼 감소
+    const normalizedPositions = { ...positions };
+    Object.keys(normalizedPositions).forEach(noteId => {
+      normalizedPositions[noteId] = {
+        ...normalizedPositions[noteId],
+        zIndex: (normalizedPositions[noteId].zIndex || 1) - 50
+      };
+    });
+
+    // maxZIndex도 함께 업데이트
+    setMaxZIndex(prev => Math.max(10, prev - 50));
+
+    return normalizedPositions;
+  };
+
+  // 노트 선택 처리 함수 수정
   const handleNoteSelect = (note: Note) => {
+    // 이미 선택된 노트를 다시 클릭한 경우 무시
+    if (selectedNote?.id === note.id) return;
+
     const oldMainNote = selectedNote;
-    const clickedPosition = notePositions[note.id];
+    const clickedNotePosition = notePositions[note.id];
+    
+    // 클릭된 노트의 현재 z-index 저장
+    const clickedNoteZIndex = clickedNotePosition?.zIndex || 1;
 
-    if (oldMainNote?.id === note.id) return;
+    // 1. 현재 폴더의 모든 노트 목록 준비
+    const currentFolderNotes = notes.filter(n => 
+      (n.folderId === currentFolderId || (!currentFolderId && !n.folderId))
+    );
 
+    // 2. 새로운 배경 노트 목록 생성 (선택된 노트 제외)
+    const newBackgroundNotes = currentFolderNotes.filter(n => n.id !== note.id);
+    
+    // 3. 새로운 위치 정보 객체 생성
+    const newPositions = { ...notePositions };
+
+    // 4. 이전 메인 노트 처리
+    if (oldMainNote) {
+      // 이전 메인 노트를 배경 노트 목록에 추가
+      if (!newBackgroundNotes.find(n => n.id === oldMainNote.id)) {
+        newBackgroundNotes.push(oldMainNote);
+      }
+
+      // 이전 메인 노트는 클릭된 노트의 위치로 이동하고, 저장해둔 z-index 사용
+      newPositions[oldMainNote.id] = {
+        x: clickedNotePosition.x,
+        y: clickedNotePosition.y,
+        rotate: clickedNotePosition.rotate,
+        zIndex: clickedNoteZIndex // 클릭된 노트의 원래 z-index 사용
+      };
+    }
+
+    // 5. 새로 선택된 노트는 중앙에 위치하고 메인 z-index 사용
+    newPositions[note.id] = {
+      x: 0,
+      y: 0,
+      rotate: 0,
+      zIndex: MAIN_NOTE_Z_INDEX
+    };
+      
+    // 6. 상태 업데이트
     setSelectedNote(note);
+    setNotePositions(newPositions);
+    setBackgroundNotes(newBackgroundNotes);
     setEditedTitle(note.title || '');
     setEditedContent(note.content || '');
     setEditedColor(note.color || 'yellow');
     setIsEditing(false);
 
-    // 현재 폴더의 노트만 배경으로 표시
-    const backgroundNotesList = notes.filter(n => 
-      n.id !== note.id && 
-      (n.folderId === currentFolderId || (!currentFolderId && !n.folderId))
-    );
-    setBackgroundNotes(backgroundNotesList);
-
+    // 7. 최근 교체된 노트 표시
     if (oldMainNote) {
-      const newPositions = { ...notePositions };
-      
-      if (clickedPosition) {
-        newPositions[oldMainNote.id] = {
-          x: clickedPosition.x,
-          y: clickedPosition.y,
-          rotate: clickedPosition.rotate
-        };
-        
-        newPositions[note.id] = {
-          x: 0,
-          y: 0,
-          rotate: 0
-        };
-        
-        setNotePositions(newPositions);
-        setRecentlySwappedNote(oldMainNote.id);
-      }
+      setRecentlySwappedNote(oldMainNote.id);
+      setTimeout(() => {
+        setRecentlySwappedNote(null);
+      }, 300);
     }
   };
 
@@ -624,7 +715,7 @@ export const NoteList = () => {
     currentNote: Note,
     existingNotes: Note[],
     maxAttempts: number = PLACEMENT_ATTEMPTS
-  ): { x: number; y: number } => {
+  ): { x: number; y: number; zIndex: number } => {
     const sector = index % 8;
     const baseAngle = (sector * Math.PI / 4) + (Math.random() * 0.2 - 0.1);
     
@@ -645,13 +736,16 @@ export const NoteList = () => {
       let x = Math.cos(angle) * distance;
       let y = Math.sin(angle) * distance;
 
-      // 위쪽으로의 거리만 제한
+      // 위쪽으로의 거리 제한 강화
       if (y < -MAX_VERTICAL_OFFSET) {
         y = -MAX_VERTICAL_OFFSET;
       }
+      
+      // 전체적으로 위로 이동
+      y += 50; // 배경 노트들을 약간 위로 이동
 
       if (isPositionValid(x, y, positions, currentNote, existingNotes)) {
-        return { x, y };
+        return { x, y, zIndex: index + 1 };
       }
     }
 
@@ -660,14 +754,14 @@ export const NoteList = () => {
       Math.random() * (effectiveMaxDistance - MIN_MAIN_NOTE_CLEARANCE) * 0.8;
     const safeAngle = baseAngle + (Math.random() - 0.5) * Math.PI / 12;
     let x = Math.cos(safeAngle) * safeDistance;
-    let y = Math.sin(safeAngle) * safeDistance;
+    let y = Math.sin(safeAngle) * safeDistance + 50; // 기본값도 위로 이동
 
     // 위쪽 거리 제한 적용
     if (y < -MAX_VERTICAL_OFFSET) {
       y = -MAX_VERTICAL_OFFSET;
     }
     
-    return { x, y };
+    return { x, y, zIndex: index + 1 };
   };
 
   // Firebase에서 노트 데이터를 가져올 때 위치 정보도 함께 로드
@@ -675,36 +769,35 @@ export const NoteList = () => {
     const user = auth.currentUser;
     if (!user) return;
 
-    // 먼저 폴더 레이아웃을 로드
-    const loadFolderLayouts = async () => {
-      try {
-        const layoutsRef = collection(db, `users/${user.uid}/folderLayouts`);
-        const layoutsSnapshot = await getDocs(layoutsRef);
-        const layouts = layoutsSnapshot.docs.map(doc => ({
-          ...doc.data()
-        } as FolderLayout));
-        setFolderLayouts(layouts);
-      } catch (error) {
-        console.error('Failed to load layouts:', error);
-      }
-    };
-
-    loadFolderLayouts();
-
     const notesRef = collection(db, `users/${user.uid}/notes`);
     const notesQuery = query(notesRef, orderBy('createdAt', 'desc'));
 
     const unsubscribe = onSnapshot(notesQuery, async (snapshot) => {
-      const notesList = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      } as Note));
+      const notesList = snapshot.docs.map(doc => {
+        const data = doc.data();
+        // Firebase에 저장된 위치 정보가 있으면 사용
+        if (data.position) {
+          const savedPosition = data.position;
+          setNotePositions(prev => ({
+            ...prev,
+            [doc.id]: {
+              x: savedPosition.x,
+              y: savedPosition.y,
+              rotate: savedPosition.rotate,
+              zIndex: savedPosition.zIndex || 1
+            }
+          }));
+        }
+        return {
+          id: doc.id,
+          ...data,
+        } as Note;
+      });
       
-      // 새로운 노트 목록 설정
       setNotes(notesList);
       
-      // 최초 로드 또는 선택된 노트가 없는 경우에만 초기화
-      if (notesList.length > 0 && (!selectedNote || !notes.length)) {
+      // 선택된 노트가 없거나 노트 목록이 비어있을 때만 초기화
+      if ((!selectedNote || !notes.length) && notesList.length > 0) {
         const firstNote = notesList[0];
         setSelectedNote(firstNote);
         setEditedTitle(firstNote.title || '');
@@ -718,63 +811,35 @@ export const NoteList = () => {
         );
         setBackgroundNotes(backgroundNotesList);
 
-        // 현재 폴더의 레이아웃 가져오기
-        const currentLayout = folderLayouts.find(layout => 
-          layout.id === (currentFolderId || 'default')
-        );
-
-        const newPositions: Record<string, NotePosition> = {};
-        
-        // 배경 노트들의 위치 설정
-        backgroundNotesList.forEach((note) => {
-          if (currentLayout?.positions[note.id]) {
-            // 저장된 레이아웃이 있는 경우 해당 위치 사용
-            newPositions[note.id] = currentLayout.positions[note.id];
-          } else {
-            // 새로운 노트의 경우 랜덤 위치 생성
+        // 위치 정보가 없는 노트들에 대해서만 새로운 위치 생성
+        const initialPositions: Record<string, NotePosition> = { ...notePositions };
+        backgroundNotesList.forEach((note, index) => {
+          if (!initialPositions[note.id] && !note.position) {
             const position = generateRandomPosition(
-              Object.keys(newPositions).length,
-              newPositions,
+              index,
+              initialPositions,
               note,
               backgroundNotesList
             );
-            newPositions[note.id] = {
+            initialPositions[note.id] = {
               x: position.x,
               y: position.y,
-              rotate: isOCDMode ? 0 : (Math.random() - 0.5) * 2 * MAX_ROTATION
+              rotate: isOCDMode ? 0 : (Math.random() - 0.5) * 2 * MAX_ROTATION,
+              zIndex: position.zIndex
             };
           }
         });
-
-        // 메인 노트는 항상 중앙에
-        newPositions[firstNote.id] = {
-          x: 0,
-          y: 0,
-          rotate: 0
-        };
         
-        setNotePositions(newPositions);
-        
-        // OCD 모드 상태 복원
-        if (currentLayout) {
-          setIsOCDMode(currentLayout.isOCDMode);
-        }
-        
-        setTimeout(() => {
-          setIsInitialLayout(false);
-        }, 100);
-      } else {
-        // 노트 목록 업데이트 시 현재 폴더의 노트만 필터링
-        const backgroundNotesList = notesList.filter(n => 
-          n.id !== selectedNote?.id && 
-          (n.folderId === currentFolderId || (!currentFolderId && !n.folderId))
-        );
-        setBackgroundNotes(backgroundNotesList);
+        // 새로 생성된 위치만 업데이트
+        setNotePositions(prev => ({
+          ...prev,
+          ...initialPositions
+        }));
       }
     });
 
     return () => unsubscribe();
-  }, [currentFolderId, folderLayouts]);
+  }, [currentFolderId]);
 
   // 선택된 노트의 내용 업데이트를 위한 별도의 useEffect
   useEffect(() => {
@@ -885,16 +950,15 @@ export const NoteList = () => {
       const user = auth.currentUser;
       if (!user) return;
 
+      // Firebase에 현재 노트의 위치만 업데이트
       await updateDoc(doc(db, `users/${user.uid}/notes/${noteId}`), {
         position: position
       });
-      
+
       setIsPositionSaved(prev => ({
         ...prev,
         [noteId]: true
       }));
-
-      showSnackbar('노트 위치가 저장되었습니다.');
     } catch (error) {
       console.error('Failed to save note position:', error);
       showSnackbar('노트 위치 저장에 실패했습니다.');
@@ -934,35 +998,12 @@ export const NoteList = () => {
     const layoutData = folderLayouts.find(layout => layout.id === (folderId || 'default'));
     
     if (layoutData) {
-      setNotePositions(layoutData.positions);
+      // 기존 위치 정보 유지하면서 레이아웃 적용
+      setNotePositions(prev => ({
+        ...prev,
+        ...layoutData.positions
+      }));
       setIsOCDMode(layoutData.isOCDMode);
-    } else {
-      // 레이아웃이 없는 경우 새로 생성
-      const newPositions: Record<string, NotePosition> = {};
-      const folderNotes = notes.filter(n => 
-        (n.folderId === folderId || (!folderId && !n.folderId)) && 
-        n.id !== selectedNote?.id
-      );
-
-      folderNotes.forEach((note, index) => {
-        const position = generateRandomPosition(index, newPositions, note, folderNotes);
-        newPositions[note.id] = {
-          x: position.x,
-          y: position.y,
-          rotate: (Math.random() - 0.5) * 2 * MAX_ROTATION
-        };
-      });
-
-      if (selectedNote) {
-        newPositions[selectedNote.id] = {
-          x: 0,
-          y: 0,
-          rotate: 0
-        };
-      }
-
-      setNotePositions(newPositions);
-      setIsOCDMode(false);
     }
 
     // 현재 폴더의 노트만 배경으로 표시
@@ -1177,7 +1218,51 @@ export const NoteList = () => {
     }
   };
 
-  // 노트 컨텐츠 영역 렌더링
+  // 보드 제목 렌더링 컴포넌트 수정
+  const renderBoardTitle = () => {
+    const boardName = currentFolderId 
+      ? `${folders.find(f => f.id === currentFolderId)?.name || ''} 보드`
+      : '메인 보드';
+
+    return (
+      <Box
+        sx={{
+          position: 'fixed',
+          top: 16,
+          left: 'calc(50% + 150px)', // 300px(왼쪽 메뉴 너비)의 절반만큼 오른쪽으로 이동
+          transform: 'translateX(-50%)',
+          bgcolor: 'rgba(255, 255, 255, 0.8)',
+          padding: '6px 16px',
+          borderRadius: '12px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          height: '40px',
+          display: 'flex',
+          alignItems: 'center',
+          zIndex: 1000,
+          transition: 'all 0.2s',
+          '&:hover': {
+            bgcolor: 'rgba(255, 255, 255, 0.9)',
+            boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
+          }
+        }}
+      >
+        <Typography 
+          sx={{ 
+            fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+            fontSize: '0.9rem',
+            fontWeight: 600,
+            color: '#2c5530',
+            lineHeight: 1,
+            m: 0,
+          }}
+        >
+          {boardName} ({backgroundNotes.length}개의 메모)
+        </Typography>
+      </Box>
+    );
+  };
+
+  // 노트 컨텐츠 영역 렌더링 수정
   const renderNoteContent = () => {
     return (
       <>
@@ -1190,7 +1275,7 @@ export const NoteList = () => {
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          transform: 'translateY(-15%)',
+          transform: 'translateY(-8%)',
           margin: '0 auto',
           pt: 0,
         }}>
@@ -1201,17 +1286,17 @@ export const NoteList = () => {
               sx={{
                 position: 'absolute',
                 width: '500px',
-                minHeight: '350px',
+                minHeight: '400px',
                 p: 3,
                 bgcolor: getBackgroundColor(selectedNote, isEditing, editedColor),
                 borderRadius: '16px',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
                 transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                zIndex: 50,
+                zIndex: MAIN_NOTE_Z_INDEX,
                 opacity: 1,
                 left: '50%',
                 top: '50%',
-                transform: 'translate(-50%, -50%) scale(1.05)',
+                transform: 'translate(-50%, -42%)',
                 filter: 'blur(0px)',
                 '&::before': {
                   content: '""',
@@ -1425,209 +1510,293 @@ export const NoteList = () => {
     </Dialog>
   );
 
-  // 노트 배경 렌더링
-  const renderBackgroundNotes = (notes: Note[]) => (
-    notes.map((note) => (
-      <Paper 
-        key={note.id}
-        elevation={3} 
-        onClick={(e) => {
-          if (isDragging.current) {
-            e.stopPropagation();
-            return;
-          }
-          handleNoteSelect(note);
-        }}
-        onMouseLeave={() => {
-          if (recentlySwappedNote === note.id) {
-            setRecentlySwappedNote(null);
-          }
-        }}
-        sx={{ 
-          position: 'absolute',
-          width: '350px',
-          minHeight: '250px',
-          p: 2,
-          bgcolor: note.color ? NOTE_COLORS[note.color].bg : NOTE_COLORS.yellow.bg,
-          left: '50%',
-          top: '50%',
-          transform: `translate(
-            calc(-50% + ${notePositions[note.id]?.x || 0}px), 
-            calc(-50% + ${notePositions[note.id]?.y || 0}px)
-          ) 
-          scale(${BASE_SCALE})
-          rotate(${notePositions[note.id]?.rotate || 0}deg)`,
-          opacity: 0.85,
-          transition: draggedNoteId === note.id ? 'none' :
-            isInitialLayout ? 'none' : 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-          filter: 'none',
-          transformOrigin: 'center center',
-          borderRadius: '16px',
-          zIndex: draggedNoteId === note.id ? 100 : 1,
-          cursor: 'grab',
-          willChange: draggedNoteId === note.id ? 'transform' : 'auto',
-          '&:active': {
-            cursor: 'grabbing'
-          },
-          '&:hover': recentlySwappedNote === note.id ? {} : {
-            opacity: 1,
-            filter: 'none',
-            transform: draggedNoteId === note.id ?
-              `translate(
-                calc(-50% + ${notePositions[note.id]?.x || 0}px), 
-                calc(-50% + ${notePositions[note.id]?.y || 0}px)
-              ) 
-              scale(${BASE_SCALE})
-              rotate(${notePositions[note.id]?.rotate || 0}deg)` :
-              `translate(
-                calc(-50% + ${notePositions[note.id]?.x || 0}px), 
-                calc(-50% + ${notePositions[note.id]?.y || 0}px)
-              )
-              scale(${HOVER_SCALE})
-              rotate(${notePositions[note.id]?.rotate || 0}deg)`,
-            zIndex: 60,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
-          },
-        }}
-        draggable={false}
-        onMouseDown={(e) => {
-          // 우클릭 시 폴더 메뉴 표시
-          if (e.button === 2) {
-            e.preventDefault();
-            e.stopPropagation();
-            setContextMenu({
-              mouseX: e.clientX,
-              mouseY: e.clientY,
-              noteId: note.id
-            });
-            return;
-          }
+  // 노트 배경 렌더링 수정
+  const renderBackgroundNotes = (notes: Note[]) => {
+    return notes.map((note) => {
+      const position = notePositions[note.id];
+      if (!position) return null;
 
-          // 좌클릭은 드래그 처리
-          const startX = e.clientX;
-          const startY = e.clientY;
-          const startPos = notePositions[note.id];
-          isDragging.current = false;
-          setDraggedNoteId(note.id); // 드래그 시작 시 노트 ID 설정
-
-          const handleMouseMove = (e: MouseEvent) => {
+      return (
+        <Paper 
+          key={note.id}
+          elevation={3} 
+          onClick={(e) => {
             if (!isDragging.current) {
-              isDragging.current = true;
+              handleNoteSelect(note);
+            }
+          }}
+          onMouseEnter={(e) => {
+            // 현재 z-index 값을 저장
+            const currentZIndex = notePositions[note.id].zIndex || 1;
+            originalZIndexRef.current[note.id] = currentZIndex;
+            
+            // 호버 시 z-index 업데이트 (메인 노트보다 높게)
+            setNotePositions(prev => ({
+              ...prev,
+              [note.id]: {
+                ...prev[note.id],
+                zIndex: HOVER_Z_INDEX
+              }
+            }));
+          }}
+          onMouseLeave={(e) => {
+            if (recentlySwappedNote === note.id) {
+              setRecentlySwappedNote(null);
             }
             
-            const deltaX = e.clientX - startX;
-            const deltaY = e.clientY - startY;
-            
-            // RAF를 사용하여 부드러운 드래그 구현
-            requestAnimationFrame(() => {
+            // 저장된 원래의 z-index 값으로 복구
+            const originalZIndex = originalZIndexRef.current[note.id];
+            if (originalZIndex) {
               setNotePositions(prev => ({
                 ...prev,
                 [note.id]: {
-                  x: startPos.x + deltaX,
-                  y: startPos.y + deltaY,
-                  rotate: startPos.rotate
+                  ...prev[note.id],
+                  zIndex: originalZIndex
                 }
               }));
-            });
-          };
+              delete originalZIndexRef.current[note.id];
+            }
+          }}
+          onMouseDown={(e) => {
+            // 우클릭 처리
+            if (e.button === 2) {
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu({
+                mouseX: e.clientX,
+                mouseY: e.clientY,
+                noteId: note.id
+              });
+              return;
+            }
 
-          const handleMouseUp = () => {
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
+            // 현재 z-index 저장
+            originalZIndexRef.current[note.id] = notePositions[note.id].zIndex || 1;
+            
+            dragStartPosition.current = {
+              x: e.clientX,
+              y: e.clientY
+            };
 
-            if (isDragging.current) {
-              saveNotePosition(note.id, notePositions[note.id]);
+            // 드래그 시작 위치 저장
+            const startPos = {
+              x: position.x,
+              y: position.y,
+              rotate: position.rotate,
+              zIndex: position.zIndex || 1
+            };
+
+            isDragging.current = false;
+
+            const handleMouseMove = (e: MouseEvent) => {
+              const deltaX = Math.abs(e.clientX - dragStartPosition.current.x);
+              const deltaY = Math.abs(e.clientY - dragStartPosition.current.y);
+              
+              if (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD) {
+                isDragging.current = true;
+                setDraggedNoteId(note.id);
+                
+                // 드래그 중인 노트의 위치만 업데이트
+                const newX = startPos.x + (e.clientX - dragStartPosition.current.x);
+                const newY = startPos.y + (e.clientY - dragStartPosition.current.y);
+
+                // 드래그 중인 노트의 위치만 업데이트하고 다른 노트들은 그대로 유지
+                setNotePositions(prev => ({
+                  ...prev,
+                  [note.id]: {
+                    ...prev[note.id],
+                    x: newX,
+                    y: newY,
+                    zIndex: HOVER_Z_INDEX
+                  }
+                }));
+              }
+            };
+
+            const handleMouseUp = (e: MouseEvent) => {
+              document.removeEventListener('mousemove', handleMouseMove);
+              document.removeEventListener('mouseup', handleMouseUp);
+
+              const deltaX = Math.abs(e.clientX - dragStartPosition.current.x);
+              const deltaY = Math.abs(e.clientY - dragStartPosition.current.y);
+
+              if (isDragging.current && (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD)) {
+                // 드래그가 끝난 노트의 최종 위치 계산
+                const finalX = startPos.x + (e.clientX - dragStartPosition.current.x);
+                const finalY = startPos.y + (e.clientY - dragStartPosition.current.y);
+
+                // 임시로 위치만 업데이트
+                const tempPositions = {
+                  ...notePositions,
+                  [note.id]: {
+                    ...startPos,
+                    x: finalX,
+                    y: finalY
+                  }
+                };
+
+                // z-index 업데이트 (항상 겹치는 노트들보다 1 높게)
+                const updatedPositions = updateDraggedNoteZIndex(
+                  note.id,
+                  finalX,
+                  finalY,
+                  tempPositions
+                );
+
+                // 위치 정보 업데이트
+                setNotePositions(updatedPositions);
+
+                // Firebase에 현재 노트의 위치 저장
+                saveNotePosition(note.id, updatedPositions[note.id]);
+              } else {
+                // 드래그가 아닌 경우 원래 z-index로 복구
+                const originalZIndex = originalZIndexRef.current[note.id];
+                if (originalZIndex) {
+                  setNotePositions(prev => ({
+                    ...prev,
+                    [note.id]: {
+                      ...prev[note.id],
+                      zIndex: originalZIndex
+                    }
+                  }));
+                }
+              }
+
+              // cleanup
+              delete originalZIndexRef.current[note.id];
               setTimeout(() => {
                 isDragging.current = false;
+                setDraggedNoteId(null);
               }, 100);
-            }
-            setDraggedNoteId(null); // 드래그 종료 시 노트 ID 초기화
-          };
+            };
 
-          document.addEventListener('mousemove', handleMouseMove);
-          document.addEventListener('mouseup', handleMouseUp);
-        }}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-      >
-        <Box sx={{ 
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-        }}>
-          <Typography 
-            variant="h6" 
-            sx={{ 
-              mb: 1, 
-              textAlign: 'center',
-              fontSize: '1.2rem',
-              fontWeight: 'bold',
-              color: '#2c5530',
-            }}
-          >
-            {note.title}
-          </Typography>
-          <Typography
-            sx={{
-              flex: 1,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              display: '-webkit-box',
-              WebkitLineClamp: 6,
-              WebkitBoxOrient: 'vertical',
-              fontSize: '0.95rem',
-              lineHeight: 1.5,
-              color: '#444',
-            }}
-          >
-            {note.content}
-          </Typography>
-          <Box sx={{
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+          }}
+          sx={{ 
+            position: 'absolute',
+            width: '350px',
+            minHeight: '250px',
+            p: 2,
+            bgcolor: note.color ? NOTE_COLORS[note.color].bg : NOTE_COLORS.yellow.bg,
+            left: '50%',
+            top: '50%',
+            transform: `translate(
+              calc(-50% + ${position.x}px), 
+              calc(-50% + ${position.y}px)
+            ) 
+            scale(${BASE_SCALE})
+            rotate(${position.rotate}deg)`,
+            opacity: 0.85,
+            transition: draggedNoteId === note.id ? 'none' :
+              isInitialLayout ? 'none' : 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            filter: 'none',
+            transformOrigin: 'center center',
+            borderRadius: '16px',
+            zIndex: position.zIndex || 1,
+            cursor: 'grab',
+            willChange: draggedNoteId === note.id ? 'transform' : 'auto',
+            '&:active': {
+              cursor: 'grabbing'
+            },
+            '&:hover': recentlySwappedNote === note.id ? {} : {
+              opacity: 1,
+              filter: 'none',
+              transform: draggedNoteId === note.id ?
+                `translate(
+                  calc(-50% + ${position.x}px), 
+                  calc(-50% + ${position.y}px)
+                ) 
+                scale(${BASE_SCALE})
+                rotate(${position.rotate}deg)` :
+                `translate(
+                  calc(-50% + ${position.x}px), 
+                  calc(-50% + ${position.y}px)
+                )
+                scale(${HOVER_SCALE})
+                rotate(${position.rotate}deg)`,
+              zIndex: HOVER_Z_INDEX,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+            },
+          }}
+        >
+          <Box sx={{ 
+            height: '100%',
             display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            mt: 1
+            flexDirection: 'column',
           }}>
             <Typography 
-              variant="caption" 
+              variant="h6" 
               sx={{ 
-                color: '#666',
-                fontStyle: 'italic',
+                mb: 1, 
+                textAlign: 'center',
+                fontSize: '1.2rem',
+                fontWeight: 'bold',
+                color: '#2c5530',
               }}
             >
-              {note.createdAt ? formatDate(note.createdAt) : ''}
+              {note.title}
             </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              {note.folderId && (
-                <Typography
-                  variant="caption"
-                  sx={{
-                    color: '#666',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  {folders.find(f => f.id === note.folderId)?.name}
-                </Typography>
-              )}
-              {isPositionSaved[note.id] && (
-                <Typography
-                  variant="caption"
-                  sx={{
-                    color: '#9cbb9c',
-                    fontSize: '0.7rem'
-                  }}
-                >
-                  ● 위치 저장됨
-                </Typography>
-              )}
+            <Typography
+              sx={{
+                flex: 1,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                display: '-webkit-box',
+                WebkitLineClamp: 6,
+                WebkitBoxOrient: 'vertical',
+                fontSize: '0.95rem',
+                lineHeight: 1.5,
+                color: '#444',
+              }}
+            >
+              {note.content}
+            </Typography>
+            <Box sx={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              mt: 1
+            }}>
+              <Typography 
+                variant="caption" 
+                sx={{ 
+                  color: '#666',
+                  fontStyle: 'italic',
+                }}
+              >
+                {note.createdAt ? formatDate(note.createdAt) : ''}
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                {note.folderId && (
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: '#666',
+                      fontSize: '0.7rem'
+                    }}
+                  >
+                    {folders.find(f => f.id === note.folderId)?.name}
+                  </Typography>
+                )}
+                {isPositionSaved[note.id] && (
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: '#9cbb9c',
+                      fontSize: '0.7rem'
+                    }}
+                  >
+                    ● 위치 저장됨
+                  </Typography>
+                )}
+              </Box>
             </Box>
           </Box>
-        </Box>
-      </Paper>
-    ))
-  );
+        </Paper>
+      );
+    }).filter(Boolean);
+  };
 
   // 컨텍스트 메뉴 닫기
   const handleContextMenuClose = () => {
@@ -1752,10 +1921,10 @@ export const NoteList = () => {
     }
   }, []);
 
-  // Modify renderOCDToggle
+  // OCD 토글 렌더링 컴포넌트 수정
   const renderOCDToggle = () => (
     <Box sx={{
-      position: 'absolute',
+      position: 'fixed',
       top: 16,
       right: 16,
       display: 'flex',
@@ -1766,18 +1935,21 @@ export const NoteList = () => {
       borderRadius: '12px',
       boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
       transition: 'all 0.2s',
-      zIndex: 1000,
+      height: '40px',
+      zIndex: 2000,
+      pointerEvents: 'auto',
       '&:hover': {
         bgcolor: 'rgba(255, 255, 255, 0.9)',
         boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
       }
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        <Typography sx={{ 
+        <Typography sx={{
           fontWeight: 600,
-          fontSize: '0.9rem',
+          fontSize: '1rem',
           color: isOCDMode ? '#2c5530' : '#666',
           minWidth: '45px',
+          lineHeight: '40px',
         }}>
           OCD
         </Typography>
@@ -1785,6 +1957,7 @@ export const NoteList = () => {
           size="small"
           checked={isOCDMode}
           onChange={(e) => {
+            e.preventDefault();
             e.stopPropagation();
             setIsOCDMode(!isOCDMode);
           }}
@@ -1795,6 +1968,8 @@ export const NoteList = () => {
             '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
               backgroundColor: '#9cbb9c',
             },
+            zIndex: 2001,
+            pointerEvents: 'auto',
           }}
         />
       </Box>
@@ -1804,11 +1979,14 @@ export const NoteList = () => {
         bgcolor: 'rgba(0,0,0,0.1)',
         mx: 1 
       }} />
-      <LoadingButton
+      <Button
         size="small"
-        onClick={saveFolderLayout}
-        loading={isLayoutSaving}
-        loadingPosition="start"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          saveFolderLayout();
+        }}
+        disabled={isLayoutSaving}
         startIcon={showSaveSuccess ? <CheckIcon /> : <SaveIcon />}
         sx={{
           bgcolor: showSaveSuccess ? '#9cbb9c' : 'white',
@@ -1818,12 +1996,162 @@ export const NoteList = () => {
           },
           transition: 'all 0.3s',
           minWidth: '100px',
+          height: '40px',
+          lineHeight: '40px',
+          zIndex: 2001,
+          pointerEvents: 'auto',
         }}
       >
-        {showSaveSuccess ? '저장됨' : '레이아웃 저장'}
-      </LoadingButton>
+        {isLayoutSaving ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CircularProgress size={14} color="inherit" />
+            저장 중...
+          </Box>
+        ) : showSaveSuccess ? '저장됨' : '레이아웃 저장'}
+      </Button>
     </Box>
   );
+
+  // 새로운 z-index 생성 함수 수정
+  const getNextZIndex = () => {
+    const nextIndex = maxZIndex + 1;
+    
+    // z-index가 임계값을 넘으면 정규화 실행
+    if (nextIndex >= Z_INDEX_THRESHOLD) {
+      setNotePositions(prev => normalizeZIndices(prev));
+      return maxZIndex - 49; // 정규화 후 다음 사용할 z-index
+    }
+    
+    setMaxZIndex(nextIndex);
+    return nextIndex;
+  };
+
+  // 노트 간의 겹침 여부를 확인하는 함수 추가
+  const isNotesOverlapping = (note1X: number, note1Y: number, note2X: number, note2Y: number): boolean => {
+    const NOTE_WIDTH = 350 * BASE_SCALE;
+    const NOTE_HEIGHT = 250 * BASE_SCALE;
+    
+    const note1Left = note1X - NOTE_WIDTH / 2;
+    const note1Right = note1X + NOTE_WIDTH / 2;
+    const note1Top = note1Y - NOTE_HEIGHT / 2;
+    const note1Bottom = note1Y + NOTE_HEIGHT / 2;
+    
+    const note2Left = note2X - NOTE_WIDTH / 2;
+    const note2Right = note2X + NOTE_WIDTH / 2;
+    const note2Top = note2Y - NOTE_HEIGHT / 2;
+    const note2Bottom = note2Y + NOTE_HEIGHT / 2;
+    
+    return !(note1Right < note2Left || 
+             note1Left > note2Right || 
+             note1Bottom < note2Top || 
+             note1Top > note2Bottom);
+  };
+
+  // 겹치는 노트들 중 가장 높은 z-index를 찾는 함수 수정
+  const findHighestOverlappingZIndex = (x: number, y: number, currentNoteId: string): number => {
+    let highestZIndex = 0;
+    
+    Object.entries(notePositions).forEach(([noteId, position]) => {
+      if (noteId !== currentNoteId && // 현재 노트 제외
+          isNotesOverlapping(x, y, position.x, position.y)) {
+        highestZIndex = Math.max(highestZIndex, position.zIndex || 1);
+      }
+    });
+    
+    // 겹치는 노트가 없으면 현재 maxZIndex 반환
+    return highestZIndex === 0 ? maxZIndex : highestZIndex;
+  };
+
+  // 특정 영역의 겹치는 노트들을 모두 찾는 함수
+  const findOverlappingNotes = (x: number, y: number, currentNoteId: string): string[] => {
+    const overlappingNotes: string[] = [];
+    
+    Object.entries(notePositions).forEach(([noteId, position]) => {
+      if (noteId !== currentNoteId && 
+          isNotesOverlapping(x, y, position.x, position.y)) {
+        overlappingNotes.push(noteId);
+      }
+    });
+    
+    return overlappingNotes;
+  };
+
+  // 겹치는 노트들의 z-index를 재정렬하는 함수
+  const reorderOverlappingNotes = (
+    x: number, 
+    y: number, 
+    draggedNoteId: string,
+    currentPositions: Record<string, NotePosition>
+  ): Record<string, NotePosition> => {
+    // 1. 겹치는 노트들 찾기
+    const overlappingNotes = findOverlappingNotes(x, y, draggedNoteId);
+    
+    // 2. 현재 위치 정보 복사
+    const newPositions = { ...currentPositions };
+    
+    // 3. 겹치는 노트들의 z-index 정렬
+    const notesToUpdate = [...overlappingNotes, draggedNoteId];
+    
+    // z-index 기준으로 정렬 (드래그된 노트 제외)
+    overlappingNotes.sort((a, b) => 
+      (currentPositions[a].zIndex || 0) - (currentPositions[b].zIndex || 0)
+    );
+
+    // 4. z-index 재할당
+    let currentZ = BASE_Z_INDEX;
+    
+    // 겹치는 노트들 먼저 처리
+    overlappingNotes.forEach(noteId => {
+      newPositions[noteId] = {
+        ...newPositions[noteId],
+        zIndex: currentZ
+      };
+      currentZ += Z_INDEX_GAP;
+    });
+    
+    // 드래그된 노트를 가장 위에 배치
+    newPositions[draggedNoteId] = {
+      ...newPositions[draggedNoteId],
+      zIndex: currentZ
+    };
+
+    return newPositions;
+  };
+
+  // 드래그된 노트의 z-index를 업데이트하는 함수
+  const updateDraggedNoteZIndex = (
+    draggedNoteId: string,
+    finalX: number,
+    finalY: number,
+    currentPositions: Record<string, NotePosition>
+  ): Record<string, NotePosition> => {
+    const newPositions = { ...currentPositions };
+    
+    // 1. 겹치는 노트들 찾기
+    const overlappingNotes = Object.entries(currentPositions)
+      .filter(([id, pos]) => 
+        id !== draggedNoteId && 
+        isNotesOverlapping(finalX, finalY, pos.x, pos.y)
+      );
+
+    if (overlappingNotes.length === 0) {
+      // 겹치는 노트가 없으면 현재 z-index 유지
+      return newPositions;
+    }
+
+    // 2. 겹치는 노트들 중 가장 높은 z-index 찾기
+    const maxZ = Math.max(
+      ...overlappingNotes.map(([_, pos]) => pos.zIndex || BASE_Z_INDEX)
+    );
+
+    // 3. 드래그된 노트를 가장 위로 올리기
+    newPositions[draggedNoteId] = {
+      ...newPositions[draggedNoteId],
+      zIndex: maxZ + 1
+    };
+
+    return newPositions;
+  };
 
   return (
     <Box sx={{ 
@@ -1886,7 +2214,8 @@ export const NoteList = () => {
         alignItems: 'flex-start',
         pt: 4,
       }}>
-        {/* OCD 토글 */}
+        {/* 상단 고정 요소들 */}
+        {renderBoardTitle()}
         {renderOCDToggle()}
 
         {/* 노트 컨텐츠 영역 */}
