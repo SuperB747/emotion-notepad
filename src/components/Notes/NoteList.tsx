@@ -1862,15 +1862,18 @@ export const NoteList = () => {
 
       setIsLayoutSaving(true);
 
+      // 현재 상태를 변경하지 않고 저장용 복사본 생성
+      const positionsForSave = { ...notePositions };
+
       // Create layout data for current folder
       const layoutData: FolderLayout = {
         id: currentFolderId || 'default',
-        positions: notePositions,
+        positions: positionsForSave,
         isOCDMode: isOCDMode,
         originalRotations: isOCDMode ? 
           folderLayouts.find(layout => layout.id === (currentFolderId || 'default'))?.originalRotations : 
           Object.fromEntries(
-            Object.entries(notePositions).map(([noteId, pos]) => [noteId, pos.rotate])
+            Object.entries(positionsForSave).map(([noteId, pos]) => [noteId, pos.rotate])
           )
       };
 
@@ -1878,7 +1881,7 @@ export const NoteList = () => {
       const layoutRef = doc(db, `users/${user.uid}/folderLayouts/${layoutData.id}`);
       await setDoc(layoutRef, layoutData);
 
-      // Update local state
+      // Update folderLayouts state without modifying current positions
       setFolderLayouts(prev => {
         const filtered = prev.filter(layout => layout.id !== layoutData.id);
         return [...filtered, layoutData];
