@@ -2,7 +2,9 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { 
   getFirestore, 
-  enableMultiTabIndexedDbPersistence 
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager
 } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -16,20 +18,11 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore
-export const db = getFirestore(app);
-
-// Enable multi-tab persistence
-enableMultiTabIndexedDbPersistence(db)
-  .then(() => {
-    console.log('Multi-tab persistence enabled successfully');
+// Initialize Firestore with persistent cache and multi-tab support
+export const db = initializeFirestore(app, {
+  cache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
   })
-  .catch((err) => {
-    if (err.code === 'failed-precondition') {
-      console.warn('Multi-tab persistence failed: Multiple tabs might be open');
-    } else if (err.code === 'unimplemented') {
-      console.warn('Multi-tab persistence is not supported in this browser');
-    }
-  });
+});
 
 export const auth = getAuth(app); 
