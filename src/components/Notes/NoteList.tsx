@@ -379,20 +379,21 @@ export const NoteList = () => {
 
   // Constants for layout calculations
   const MAX_ROTATION = 2; // 최대 회전 각도
-  const SAFE_MARGIN = 100; // 화면 경계와의 최소 간격 증가
-  const MIN_DISTANCE = 200; // 노트 간 최소 거리
+  const SAFE_MARGIN = 150; // 화면 경계와의 최소 간격
+  const MIN_DISTANCE = 250; // 노트 간 최소 거리
   const MIN_SAME_COLOR_DISTANCE = 350; // 같은 색상 노트 간 최소 거리
   const MIN_MAIN_NOTE_CLEARANCE = 400; // 메인 노트와의 최소 거리
-  const MAX_MAIN_NOTE_CLEARANCE = 500; // 메인 노트와의 최대 거리 감소
+  const MAX_MAIN_NOTE_CLEARANCE = 500; // 메인 노트와의 최대 거리
+  const MAX_VERTICAL_OFFSET = 200; // 위쪽으로 최대 거리 제한
   const PLACEMENT_ATTEMPTS = 40; // 시도 횟수
   const BASE_SCALE = 0.65; // 배경 노트 기본 스케일
   const HOVER_SCALE = 0.85; // 배경 노트 호버 스케일
-  const MAIN_NOTE_WIDTH = 500; // 메인 노트 너비
-  const MAIN_NOTE_HEIGHT = 350; // 메인 노트 높이
+  const MAIN_NOTE_WIDTH = 400; // 메인 노트 너비
+  const MAIN_NOTE_HEIGHT = 300; // 메인 노트 높이
   const BACKGROUND_NOTE_WIDTH = 300; // 배경 노트 너비
   const BACKGROUND_NOTE_HEIGHT = 220; // 배경 노트 높이
   const FRAME_WIDTH = 1200; // 노트 표시 프레임 너비
-  const FRAME_HEIGHT = 800; // 노트 표시 프레임 높이
+  const FRAME_HEIGHT = 750; // 노트 표시 프레임 높이
 
   // 로그아웃 처리
   const handleLogout = async () => {
@@ -747,7 +748,7 @@ export const NoteList = () => {
     return NOTE_COLORS.yellow.bg;
   };
 
-  // 랜덤 위치 생성 (거리에 따른 가중치 적용)
+  // 랜덤 위치 생성 함수 수정
   const generateRandomPosition = (
     index: number,
     positions: Record<string, NotePosition>,
@@ -755,20 +756,14 @@ export const NoteList = () => {
     existingNotes: Note[],
     maxAttempts: number = PLACEMENT_ATTEMPTS
   ): { x: number; y: number } => {
-    // 화면을 8개의 구역으로 나누어 배치
     const sector = index % 8;
     const baseAngle = (sector * Math.PI / 4) + (Math.random() * 0.2 - 0.1);
     
-    // 화면 크기에 따른 최대 거리 계산 (회전을 고려한 여유 공간)
-    const rotationMargin = Math.sin(Math.PI / 4) * 
-      (BACKGROUND_NOTE_WIDTH * BASE_SCALE - BACKGROUND_NOTE_HEIGHT * BASE_SCALE) / 2;
-    
     const maxScreenRadius = Math.min(
-      FRAME_WIDTH / 2 - BACKGROUND_NOTE_WIDTH * BASE_SCALE - SAFE_MARGIN - rotationMargin,
-      FRAME_HEIGHT / 2 - BACKGROUND_NOTE_HEIGHT * BASE_SCALE - SAFE_MARGIN - rotationMargin
+      FRAME_WIDTH / 2 - BACKGROUND_NOTE_WIDTH * BASE_SCALE - SAFE_MARGIN,
+      FRAME_HEIGHT / 2 - BACKGROUND_NOTE_HEIGHT * BASE_SCALE - SAFE_MARGIN
     );
 
-    // 실제 사용할 최대 거리 결정
     const effectiveMaxDistance = Math.min(MAX_MAIN_NOTE_CLEARANCE, maxScreenRadius);
     
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -778,22 +773,32 @@ export const NoteList = () => {
       const angleVariation = (Math.random() - 0.5) * Math.PI / 9;
       const angle = baseAngle + angleVariation;
       
-      const x = Math.cos(angle) * distance;
-      const y = Math.sin(angle) * distance;
+      let x = Math.cos(angle) * distance;
+      let y = Math.sin(angle) * distance;
+
+      // 위쪽으로의 거리만 제한
+      if (y < -MAX_VERTICAL_OFFSET) {
+        y = -MAX_VERTICAL_OFFSET;
+      }
 
       if (isPositionValid(x, y, positions, currentNote, existingNotes)) {
         return { x, y };
       }
     }
 
+    // 안전한 위치를 찾지 못한 경우의 기본값
     const safeDistance = MIN_MAIN_NOTE_CLEARANCE + 
       Math.random() * (effectiveMaxDistance - MIN_MAIN_NOTE_CLEARANCE) * 0.8;
     const safeAngle = baseAngle + (Math.random() - 0.5) * Math.PI / 12;
+    let x = Math.cos(safeAngle) * safeDistance;
+    let y = Math.sin(safeAngle) * safeDistance;
+
+    // 위쪽 거리 제한 적용
+    if (y < -MAX_VERTICAL_OFFSET) {
+      y = -MAX_VERTICAL_OFFSET;
+    }
     
-    return {
-      x: Math.cos(safeAngle) * safeDistance,
-      y: Math.sin(safeAngle) * safeDistance
-    };
+    return { x, y };
   };
 
   // 노트 위치 저장 함수
@@ -879,9 +884,9 @@ export const NoteList = () => {
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        transform: 'translateY(-5%)',  // 전체를 약간 위로 올림
-        margin: '0 auto',  // 좌우 중앙 정렬
-        pt: 0,  // 기존 패딩 제거
+        transform: 'translateY(-15%)',  // -5%에서 -15%로 수정하여 더 위로 올림
+        margin: '0 auto',
+        pt: 0,
       }}>
         {/* 배경 노트들 */}
         {backgroundNotes.map((note) => (
