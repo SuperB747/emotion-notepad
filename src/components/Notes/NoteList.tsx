@@ -422,7 +422,7 @@ export const NoteList = () => {
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
 
   // Constants for layout calculations
-  const MAX_ROTATION = 2; // 최대 회전 각도
+  const MAX_ROTATION = 5; // 최대 회전 각도
   const SAFE_MARGIN = 150; // 화면 경계와의 최소 간격
   const MIN_DISTANCE = 250; // 노트 간 최소 거리
   const MIN_SAME_COLOR_DISTANCE = 350; // 같은 색상 노트 간 최소 거리
