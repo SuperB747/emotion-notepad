@@ -1,0 +1,33 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 사용자가 로그인했는지 확인하는 함수
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // 요청한 문서가 해당 사용자의 것인지 확인하는 함수
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // 노트 컬렉션 규칙
+    match /notes/{noteId} {
+      allow read, write: if isAuthenticated() && 
+        (request.auth.uid == resource.data.userId || 
+        (request.method == 'create' && request.auth.uid == request.resource.data.userId));
+    }
+
+    // 폴더 컬렉션 규칙
+    match /folders/{folderId} {
+      allow read, write: if isAuthenticated() && 
+        (request.auth.uid == resource.data.userId || 
+        (request.method == 'create' && request.auth.uid == request.resource.data.userId));
+    }
+
+    match /users/{userId}/{document=**} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+  }
+}
