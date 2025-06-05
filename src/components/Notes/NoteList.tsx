@@ -1338,7 +1338,7 @@ export const NoteList = () => {
         sx={{
           position: 'fixed',
           top: 16,
-          left: '50%',
+          left: 'calc(280px + (100% - 280px) / 2)',
           transform: 'translateX(-50%)',
           bgcolor: 'rgba(255, 255, 255, 0.8)',
           padding: '6px 16px',
@@ -1347,8 +1347,10 @@ export const NoteList = () => {
           height: '40px',
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'center',
           zIndex: 1000,
           transition: 'all 0.2s',
+          minWidth: '200px',
           '&:hover': {
             bgcolor: 'rgba(255, 255, 255, 0.9)',
             boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
@@ -1363,6 +1365,8 @@ export const NoteList = () => {
             color: '#2c5530',
             lineHeight: 1,
             m: 0,
+            textAlign: 'center',
+            width: '100%',
           }}
         >
           {boardName} ({currentFolderNotes.length}개의 메모)
@@ -2072,7 +2076,7 @@ export const NoteList = () => {
           shuffleNotes();
         }}
         startIcon={<ShuffleIcon />}
-        sx={{
+노        sx={{
           bgcolor: 'white',
           color: '#666',
           '&:hover': {
