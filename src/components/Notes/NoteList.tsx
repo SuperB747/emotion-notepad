@@ -1325,6 +1325,13 @@ export const NoteList = () => {
       ? `${folders.find(f => f.id === currentFolderId)?.name || ''} 보드`
       : '메인 보드';
 
+    // 현재 폴더의 메모 개수 계산
+    const currentFolderNotes = notes.filter(note => 
+      currentFolderId 
+        ? note.folderId === currentFolderId 
+        : !note.folderId
+    );
+
     return (
       <Box
         sx={{
@@ -1357,7 +1364,7 @@ export const NoteList = () => {
             m: 0,
           }}
         >
-          {boardName} ({backgroundNotes.length}개의 메모)
+          {boardName} ({currentFolderNotes.length}개의 메모)
         </Typography>
       </Box>
     );
@@ -1940,7 +1947,40 @@ export const NoteList = () => {
     }
   }, []);
 
-  // OCD 토글 렌더링 컴포넌트 수정
+  // OCD 모드 변경 시 노트 회전 업데이트
+  useEffect(() => {
+    const updatedPositions = { ...notePositions };
+    let hasChanges = false;
+
+    Object.entries(updatedPositions).forEach(([noteId, position]) => {
+      if (isOCDMode) {
+        // OCD 모드 켜짐: 모든 노트를 0도로
+        if (position.rotate !== 0) {
+          updatedPositions[noteId] = {
+            ...position,
+            rotate: 0
+          };
+          hasChanges = true;
+        }
+      } else {
+        // OCD 모드 꺼짐: 랜덤 회전 적용
+        const randomRotation = (Math.random() - 0.5) * 2 * MAX_ROTATION;
+        if (position.rotate === 0) {
+          updatedPositions[noteId] = {
+            ...position,
+            rotate: randomRotation
+          };
+          hasChanges = true;
+        }
+      }
+    });
+
+    if (hasChanges) {
+      setNotePositions(updatedPositions);
+    }
+  }, [isOCDMode]);
+
+  // 렌더링 컴포넌트들...
   const renderOCDToggle = () => (
     <Box sx={{
       position: 'fixed',
