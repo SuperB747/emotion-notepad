@@ -739,8 +739,9 @@ export const NoteList = () => {
         }));
         setBackgroundNotes(prev => [...prev, currentMainNote]);
         
-        // 이전 메인 노트의 호버 효과 비활성화
+        // 이전 메인 노트의 호버 효과 비활성화 및 z-index 저장
         setHoverDisabledNote(selectedNote.id);
+        originalZIndexRef.current[selectedNote.id] = newZIndex;
       }
     }
 
@@ -761,6 +762,7 @@ export const NoteList = () => {
     // 잠시 후 전환 효과 종료
     setTimeout(() => {
       setRecentlySwappedNote(null);
+      setHoverDisabledNote(null); // 호버 비활성화 상태도 함께 해제
     }, 300);
   };
 
