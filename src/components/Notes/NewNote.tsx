@@ -11,9 +11,8 @@ import {
   Snackbar,
 } from '@mui/material';
 import { Save as SaveIcon, ArrowBack as ArrowBackIcon } from '@mui/icons-material';
-import { NOTE_COLORS } from './NoteList';  // Import the colors from NoteList
-
-type NoteColor = keyof typeof NOTE_COLORS;
+import { NOTE_COLORS } from '../../constants/noteConstants';
+import type { NoteColor } from '../../types/noteTypes';
 
 export const NewNote = () => {
   const [title, setTitle] = useState('');
