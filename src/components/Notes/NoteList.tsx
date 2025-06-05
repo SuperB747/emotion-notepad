@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { db, auth } from '../../config/firebase';
 import { collection, query, orderBy, onSnapshot, deleteDoc, doc, updateDoc, addDoc, getDocs, writeBatch, where, serverTimestamp, setDoc, getDoc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -426,7 +426,7 @@ export const NoteList = () => {
   const [isLayoutSaving, setIsLayoutSaving] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [maxZIndex, setMaxZIndex] = useState(10);
-  const originalZIndexRef = React.useRef<number | null>(null);
+  const originalZIndexRef = useRef<number | undefined>(undefined);
   
   // z-index 관련 상수 수정
   const MAIN_NOTE_Z_INDEX = 95;
@@ -443,8 +443,8 @@ export const NoteList = () => {
   const SAFE_MARGIN = 150; // 화면 경계와의 최소 간격
   const MIN_DISTANCE = 250; // 노트 간 최소 거리
   const MIN_SAME_COLOR_DISTANCE = 350; // 같은 색상 노트 간 최소 거리
-  const MIN_MAIN_NOTE_CLEARANCE = 400; // 메인 노트와의 최소 거리
-  const MAX_MAIN_NOTE_CLEARANCE = 500; // 메인 노트와의 최대 거리
+  const MIN_MAIN_NOTE_CLEARANCE = 100; // 메인 노트와의 최소 거리
+  const MAX_MAIN_NOTE_CLEARANCE = 300; // 메인 노트와의 최대 거리
   const MAX_VERTICAL_OFFSET = 200; // 위쪽으로 최대 거리 제한
   const PLACEMENT_ATTEMPTS = 40; // 시도 횟수
   const BASE_SCALE = 0.65; // 배경 노트 기본 스케일
@@ -455,6 +455,11 @@ export const NoteList = () => {
   const BACKGROUND_NOTE_HEIGHT = 220; // 배경 노트 높이
   const FRAME_WIDTH = 1200; // 노트 표시 프레임 너비
   const FRAME_HEIGHT = 750; // 노트 표시 프레임 높이
+
+  // 메인 노트와의 오버랩 관련 상수 추가
+  const MAIN_NOTE_OVERLAP_PERCENT = 30; // 메인 노트와 배경 노트가 겹칠 수 있는 최대 비율 (0-100)
+  const MAIN_NOTE_EFFECTIVE_WIDTH = MAIN_NOTE_WIDTH * (1 - MAIN_NOTE_OVERLAP_PERCENT / 100);
+  const MAIN_NOTE_EFFECTIVE_HEIGHT = MAIN_NOTE_HEIGHT * (1 - MAIN_NOTE_OVERLAP_PERCENT / 100);
 
   // 공통 스타일을 상수로 정의
   const commonCardStyle = {
@@ -499,37 +504,123 @@ export const NoteList = () => {
     return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
   };
 
-  // 메인 노트와의 거리 계산
-  const getDistanceFromMainNote = (x: number, y: number) => {
-    return Math.sqrt(x * x + y * y);
+  // 두 사각형이 겹치는지 확인하는 함수
+  const isRectanglesOverlap = (
+    rect1: { left: number; right: number; top: number; bottom: number },
+    rect2: { left: number; right: number; top: number; bottom: number }
+  ): boolean => {
+    return !(
+      rect1.right < rect2.left ||
+      rect1.left > rect2.right ||
+      rect1.bottom < rect2.top ||
+      rect1.top > rect2.bottom
+    );
   };
 
-  // 위치가 화면 내에 있는지 확인 (회전을 고려한 체크)
-  const isWithinScreen = (x: number, y: number, rotation: number = 0): boolean => {
-    const scaledWidth = BACKGROUND_NOTE_WIDTH * BASE_SCALE;
-    const scaledHeight = BACKGROUND_NOTE_HEIGHT * BASE_SCALE;
+  // 두 사각형 간의 최단 거리 계산
+  const getRectanglesDistance = (
+    rect1: { left: number; right: number; top: number; bottom: number },
+    rect2: { left: number; right: number; top: number; bottom: number }
+  ): number => {
+    const distX = Math.max(rect1.left - rect2.right, 0, rect2.left - rect1.right);
+    const distY = Math.max(rect1.top - rect2.bottom, 0, rect2.top - rect1.bottom);
+    return Math.sqrt(distX * distX + distY * distY);
+  };
+
+  // 메인 노트와의 거리 계산
+  const getDistanceFromMainNote = (x: number, y: number): number => {
+    // 메인 노트의 경계 계산 (실제 크기)
+    const mainNoteLeft = -MAIN_NOTE_WIDTH / 2;
+    const mainNoteRight = MAIN_NOTE_WIDTH / 2;
+    const mainNoteTop = -MAIN_NOTE_HEIGHT / 2;
+    const mainNoteBottom = MAIN_NOTE_HEIGHT / 2;
+
+    // 배경 노트의 경계 계산 (실제 크기와 스케일 고려)
+    const bgNoteWidth = BACKGROUND_NOTE_WIDTH * BASE_SCALE;
+    const bgNoteHeight = BACKGROUND_NOTE_HEIGHT * BASE_SCALE;
+    const bgNoteHalfWidth = bgNoteWidth / 2;
+    const bgNoteHalfHeight = bgNoteHeight / 2;
+
+    // 배경 노트의 경계
+    const bgNoteLeft = x - bgNoteHalfWidth;
+    const bgNoteRight = x + bgNoteHalfWidth;
+    const bgNoteTop = y - bgNoteHalfHeight;
+    const bgNoteBottom = y + bgNoteHalfHeight;
+
+    // 겹치는 영역 계산
+    const overlapLeft = Math.max(mainNoteLeft, bgNoteLeft);
+    const overlapRight = Math.min(mainNoteRight, bgNoteRight);
+    const overlapTop = Math.max(mainNoteTop, bgNoteTop);
+    const overlapBottom = Math.min(mainNoteBottom, bgNoteBottom);
+
+    // 겹치는 영역이 있는지 확인
+    if (overlapLeft < overlapRight && overlapTop < overlapBottom) {
+      // 겹치는 영역의 넓이 계산
+      const overlapWidth = overlapRight - overlapLeft;
+      const overlapHeight = overlapBottom - overlapTop;
+      const overlapArea = overlapWidth * overlapHeight;
+
+      // 배경 노트의 전체 넓이
+      const bgNoteArea = bgNoteWidth * bgNoteHeight;
+
+      // 배경 노트 대비 겹치는 영역의 비율 계산
+      const overlapPercent = (overlapArea / bgNoteArea) * 100;
+
+      // 허용된 오버랩 비율보다 크면 충돌로 판정
+      if (overlapPercent > MAIN_NOTE_OVERLAP_PERCENT) {
+        return 0;
+      }
+    }
+
+    // 두 사각형 간의 최단 거리 계산
+    const dx = Math.max(mainNoteLeft - bgNoteRight, 0, bgNoteLeft - mainNoteRight);
+    const dy = Math.max(mainNoteTop - bgNoteBottom, 0, bgNoteTop - mainNoteBottom);
     
-    // 회전을 고려한 노트의 실제 차지하는 영역 계산
-    const rotationRad = Math.abs(rotation * Math.PI / 180);
-    const effectiveWidth = Math.abs(scaledWidth * Math.cos(rotationRad)) + Math.abs(scaledHeight * Math.sin(rotationRad));
-    const effectiveHeight = Math.abs(scaledWidth * Math.sin(rotationRad)) + Math.abs(scaledHeight * Math.cos(rotationRad));
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  // 화면 범위 체크
+  const isWithinScreen = (x: number, y: number, rotation: number): boolean => {
+    const bgNoteHalfWidth = (BACKGROUND_NOTE_WIDTH * BASE_SCALE) / 2;
+    const bgNoteHalfHeight = (BACKGROUND_NOTE_HEIGHT * BASE_SCALE) / 2;
+
+    // 회전을 고려한 경계 상자 계산
+    const angleRad = (rotation * Math.PI) / 180;
+    const cosAngle = Math.cos(angleRad);
+    const sinAngle = Math.sin(angleRad);
     
-    // 프레임 내부 여유 공간 계산
-    const maxX = FRAME_WIDTH / 2 - effectiveWidth / 2 - SAFE_MARGIN;
-    const maxY = FRAME_HEIGHT / 2 - effectiveHeight / 2 - SAFE_MARGIN;
-    
+    // 회전된 사각형의 각 꼭지점 계산
+    const corners = [
+      { x: -bgNoteHalfWidth, y: -bgNoteHalfHeight },
+      { x: bgNoteHalfWidth, y: -bgNoteHalfHeight },
+      { x: bgNoteHalfWidth, y: bgNoteHalfHeight },
+      { x: -bgNoteHalfWidth, y: bgNoteHalfHeight }
+    ].map(point => ({
+      x: x + (point.x * cosAngle - point.y * sinAngle),
+      y: y + (point.x * sinAngle + point.y * cosAngle)
+    }));
+
+    // 회전된 사각형의 경계 상자 계산
+    const minX = Math.min(...corners.map(p => p.x));
+    const maxX = Math.max(...corners.map(p => p.x));
+    const minY = Math.min(...corners.map(p => p.y));
+    const maxY = Math.max(...corners.map(p => p.y));
+
+    // 화면 범위 체크 (여백 고려)
     return (
-      Math.abs(x) <= maxX &&
-      Math.abs(y) <= maxY
+      minX >= -FRAME_WIDTH / 2 + SAFE_MARGIN &&
+      maxX <= FRAME_WIDTH / 2 - SAFE_MARGIN &&
+      minY >= -FRAME_HEIGHT / 2 + SAFE_MARGIN &&
+      maxY <= FRAME_HEIGHT / 2 - SAFE_MARGIN
     );
   };
 
   // 위치가 메인 노트와 충분히 떨어져 있는지 확인
   const isPositionValid = (x: number, y: number, positions: Record<string, NotePosition>, currentNote: Note, existingNotes: Note[]): boolean => {
-    // 메인 노트와의 거리 체크
+    // 메인 노트와의 거리 체크 (오버랩 허용 비율 적용)
     const distanceFromMain = getDistanceFromMainNote(x, y);
-    if (distanceFromMain < MIN_MAIN_NOTE_CLEARANCE) {
-      return false;
+    if (distanceFromMain === 0) {
+      return false; // 메인 노트의 유효 영역과 겹침
     }
 
     // 다른 배경 노트들과의 거리 체크
@@ -617,82 +708,48 @@ export const NoteList = () => {
     }, 1000); // 1초 디바운스
   }, []);
 
-  // 노트 선택 처리 함수 수정
+  // 노트 선택 핸들러 수정
   const handleNoteSelect = (note: Note) => {
     if (selectedNote?.id === note.id) return;
 
-    const oldMainNote = selectedNote;
+    // 클릭한 배경 노트의 현재 위치와 회전값 저장
     const clickedNotePosition = notePositions[note.id];
-    
-    // 클릭된 노트의 현재 z-index 저장
-    originalZIndexRef.current = clickedNotePosition?.zIndex || 0;
+    if (!clickedNotePosition) return;
 
-    const newPositions = { ...notePositions };
-    const updates: Record<string, NotePosition> = {};
-
-    // 이전 메인 노트 처리
-    if (oldMainNote) {
-      const oldMainPosition = {
-        ...notePositions[oldMainNote.id],
-        x: clickedNotePosition.x,
-        y: clickedNotePosition.y,
-        rotate: clickedNotePosition.rotate,
-        zIndex: originalZIndexRef.current
-      };
-      newPositions[oldMainNote.id] = oldMainPosition;
-      updates[oldMainNote.id] = oldMainPosition;
+    // 현재 선택된 노트가 있다면 배경으로 전환
+    if (selectedNote) {
+      const currentMainNote = notes.find(n => n.id === selectedNote.id);
+      if (currentMainNote) {
+        // 현재 메인 노트를 클릭한 배경 노트의 위치로 이동
+        setNotePositions(prev => ({
+          ...prev,
+          [selectedNote.id]: {
+            ...clickedNotePosition,
+            zIndex: prev[note.id].zIndex // 기존 배경 노트의 z-index 유지
+          }
+        }));
+        setBackgroundNotes(prev => [...prev, currentMainNote]);
+      }
     }
 
-    // 새로 선택된 노트는 중앙에 위치하고 메인 z-index 사용
-    const newMainPosition = {
-      x: 0,
-      y: 0,
-      rotate: 0,
-      zIndex: MAIN_NOTE_Z_INDEX
-    };
-    newPositions[note.id] = newMainPosition;
-    updates[note.id] = newMainPosition;
-
-    // 상태 업데이트
-    setNotePositions(newPositions);
+    // 선택된 노트를 배경에서 제거하고 메인 노트로 설정
+    setBackgroundNotes(prev => prev.filter(n => n.id !== note.id));
     setSelectedNote(note);
-    setEditedTitle(note.title || '');
-    setEditedContent(note.content || '');
-    setEditedColor(note.color || 'yellow');
-    setIsEditing(false);
+    setRecentlySwappedNote(note.id);
 
-    // 배경 노트 목록 업데이트
-    const newBackgroundNotes = notes.filter(n => {
-      const isInCurrentFolder = !currentFolderId || n.folderId === currentFolderId;
-      return n.id !== note.id && isInCurrentFolder;
-    });
-
-    if (oldMainNote) {
-      const isOldMainInCurrentFolder = !currentFolderId || oldMainNote.folderId === currentFolderId;
-      if (isOldMainInCurrentFolder && !newBackgroundNotes.find(n => n.id === oldMainNote.id)) {
-        newBackgroundNotes.push(oldMainNote);
+    // 새로운 메인 노트의 위치 설정 (기존 위치와 회전값 유지)
+    setNotePositions(prev => ({
+      ...prev,
+      [note.id]: {
+        ...clickedNotePosition,
+        zIndex: MAIN_NOTE_Z_INDEX
       }
-    }
+    }));
 
-    setBackgroundNotes(newBackgroundNotes);
-
-    // Firebase 업데이트는 UI 전환 후에 수행
-    const user = auth.currentUser;
-    if (user) {
-      const batch = writeBatch(db);
-      
-      if (oldMainNote) {
-        const oldMainNoteRef = doc(db, `users/${user.uid}/notes/${oldMainNote.id}`);
-        batch.update(oldMainNoteRef, { position: newPositions[oldMainNote.id] });
-      }
-      
-      const newMainNoteRef = doc(db, `users/${user.uid}/notes/${note.id}`);
-      batch.update(newMainNoteRef, { position: newPositions[note.id] });
-      
-      batch.commit().catch(error => {
-        console.error('Failed to update note positions:', error);
-      });
-    }
+    // 잠시 후 전환 효과 종료
+    setTimeout(() => {
+      setRecentlySwappedNote(null);
+    }, 300);
   };
 
   // 초기 노트 위치 설정 함수 수정
@@ -785,6 +842,26 @@ export const NoteList = () => {
     return () => unsubscribe();
   }, [currentFolderId]);
 
+  // 드래그 종료 핸들러 수정 (Firebase 저장 로직 제거)
+  const handleDragEnd = (e: MouseEvent) => {
+    if (!draggedNoteId || !isDragging.current) return;
+
+    const finalX = e.clientX - dragStartPosition.current.x;
+    const finalY = e.clientY - dragStartPosition.current.y;
+
+    setNotePositions(prev => ({
+      ...prev,
+      [draggedNoteId]: {
+        ...prev[draggedNoteId],
+        x: finalX,
+        y: finalY
+      }
+    }));
+
+    setDraggedNoteId(null);
+    isDragging.current = false;
+  };
+
   // 드래그 종료 시 z-index 업데이트 함수
   const updateDraggedNoteZIndex = (
     draggedNoteId: string,
@@ -829,8 +906,9 @@ export const NoteList = () => {
     const effectiveMaxDistance = Math.min(MAX_MAIN_NOTE_CLEARANCE, maxScreenRadius);
     
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const distance = MIN_MAIN_NOTE_CLEARANCE + 
-        Math.random() * (effectiveMaxDistance - MIN_MAIN_NOTE_CLEARANCE);
+      // 메인 노트로부터의 최소 거리를 더 크게 설정
+      const minDistance = MIN_MAIN_NOTE_CLEARANCE + BACKGROUND_NOTE_WIDTH * BASE_SCALE;
+      const distance = minDistance + Math.random() * (effectiveMaxDistance - minDistance);
       
       const angleVariation = (Math.random() - 0.5) * Math.PI / 9;
       const angle = baseAngle + angleVariation;
@@ -852,11 +930,11 @@ export const NoteList = () => {
     }
 
     // 안전한 위치를 찾지 못한 경우의 기본값
-    const safeDistance = MIN_MAIN_NOTE_CLEARANCE + 
+    const safeDistance = MIN_MAIN_NOTE_CLEARANCE + BACKGROUND_NOTE_WIDTH * BASE_SCALE + 
       Math.random() * (effectiveMaxDistance - MIN_MAIN_NOTE_CLEARANCE) * 0.8;
     const safeAngle = baseAngle + (Math.random() - 0.5) * Math.PI / 12;
     let x = Math.cos(safeAngle) * safeDistance;
-    let y = Math.sin(safeAngle) * safeDistance + 50; // 기본값도 위로 이동
+    let y = Math.sin(safeAngle) * safeDistance + 50;
 
     // 위쪽 거리 제한 적용
     if (y < -MAX_VERTICAL_OFFSET) {
@@ -1650,7 +1728,7 @@ export const NoteList = () => {
       const position = notePositions[note.id];
       if (!position) return null;
 
-      const isTransitioning = selectedNote?.id === note.id || recentlySwappedNote === note.id;
+      const isTransitioning = recentlySwappedNote === note.id;
 
       return (
         <Paper 
@@ -1665,8 +1743,7 @@ export const NoteList = () => {
             if (isTransitioning) return;
             
             // 현재 z-index 값을 저장
-            const currentZIndex = notePositions[note.id].zIndex || 0;
-            originalZIndexRef.current = currentZIndex;
+            originalZIndexRef.current = position.zIndex || 1;
             
             // 호버 시 z-index 업데이트
             setNotePositions(prev => ({
@@ -1680,22 +1757,14 @@ export const NoteList = () => {
           onMouseLeave={(e) => {
             if (isTransitioning) return;
 
-            if (recentlySwappedNote === note.id) {
-              setRecentlySwappedNote(null);
-            }
-            
             // 저장된 원래의 z-index 값으로 복구
-            const originalZIndex = originalZIndexRef.current;
-            if (originalZIndex !== null) {
-              setNotePositions(prev => ({
-                ...prev,
-                [note.id]: {
-                  ...prev[note.id],
-                  zIndex: originalZIndex
-                }
-              }));
-              originalZIndexRef.current = null;
-            }
+            setNotePositions(prev => ({
+              ...prev,
+              [note.id]: {
+                ...prev[note.id],
+                zIndex: originalZIndexRef.current
+              }
+            }));
           }}
           sx={{ 
             position: 'absolute',
@@ -1727,6 +1796,7 @@ export const NoteList = () => {
             '&:hover': (isTransitioning || recentlySwappedNote === note.id) ? {} : {
               opacity: 1,
               filter: 'none',
+              zIndex: HOVER_Z_INDEX,
               transform: draggedNoteId === note.id ?
                 `translate(
                   calc(-50% + ${position.x}px), 
@@ -1740,7 +1810,6 @@ export const NoteList = () => {
                 )
                 scale(${HOVER_SCALE})
                 rotate(${position.rotate}deg)`,
-              zIndex: HOVER_Z_INDEX,
               boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
             },
           }}
@@ -1939,35 +2008,47 @@ export const NoteList = () => {
 
   // 레이아웃 저장 함수 수정
   const saveFolderLayout = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    setIsLayoutSaving(true);
+
     try {
-      const user = auth.currentUser;
-      if (!user) return;
+      const batch = writeBatch(db);
+      
+      // 모든 노트(메인 노트 + 배경 노트)의 현재 위치 정보를 저장
+      const allNotes = [...backgroundNotes];
+      if (selectedNote) allNotes.push(selectedNote);
 
-      setIsLayoutSaving(true);
-
-      const layoutData: FolderLayout = {
-        id: currentFolderId || 'default',
-        positions: notePositions,
-        isOCDMode: isOCDMode,
-        originalRotations: isOCDMode ? 
-          Object.fromEntries(
-            Object.entries(notePositions).map(([noteId, pos]) => [noteId, pos.rotate])
-          ) : undefined
-      };
-
-      const layoutRef = doc(db, `users/${user.uid}/folderLayouts/${layoutData.id}`);
-      await setDoc(layoutRef, layoutData);
-
-      setFolderLayouts(prev => {
-        const filtered = prev.filter(layout => layout.id !== layoutData.id);
-        return [...filtered, layoutData];
+      allNotes.forEach(note => {
+        const position = notePositions[note.id];
+        if (position) {
+          const noteRef = doc(db, `users/${user.uid}/notes/${note.id}`);
+          batch.update(noteRef, {
+            position: {
+              x: position.x,
+              y: position.y,
+              rotate: position.rotate,
+              zIndex: position.zIndex
+            }
+          });
+        }
       });
 
+      // 폴더 레이아웃 정보 저장
+      const layoutRef = doc(db, `users/${user.uid}/layouts/${currentFolderId || 'default'}`);
+      await setDoc(layoutRef, {
+        positions: notePositions,
+        isOCDMode,
+        updatedAt: serverTimestamp()
+      });
+
+      await batch.commit();
+      
       setShowSaveSuccess(true);
       setTimeout(() => setShowSaveSuccess(false), 2000);
     } catch (error) {
       console.error('Failed to save layout:', error);
-      showSnackbar('레이아웃 저장에 실패했습니다.');
     } finally {
       setIsLayoutSaving(false);
     }
