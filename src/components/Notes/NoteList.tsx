@@ -408,6 +408,7 @@ export const NoteList = () => {
   const [editedContent, setEditedContent] = useState('');
   const [editedColor, setEditedColor] = useState<NoteColor>('yellow');
   const [recentlySwappedNote, setRecentlySwappedNote] = useState<string | null>(null);
+  const [hoverDisabledNote, setHoverDisabledNote] = useState<string | null>(null);
   const [isOCDMode, setIsOCDMode] = useState(false);
   const [isPositionSaved, setIsPositionSaved] = useState<Record<string, boolean>>({});
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -712,7 +713,7 @@ export const NoteList = () => {
   const handleNoteSelect = (note: Note) => {
     if (selectedNote?.id === note.id) return;
 
-    // 클릭한 배경 노트의 현재 위치와 회전값 저장
+    // 클릭한 배경 노트의 현재 위치와 회전값, z-index 저장
     const clickedNotePosition = notePositions[note.id];
     if (!clickedNotePosition) return;
 
@@ -721,14 +722,21 @@ export const NoteList = () => {
       const currentMainNote = notes.find(n => n.id === selectedNote.id);
       if (currentMainNote) {
         // 현재 메인 노트를 클릭한 배경 노트의 위치로 이동
+        const newZIndex = Math.max(1, ...Object.values(notePositions)
+          .filter(pos => pos.zIndex !== MAIN_NOTE_Z_INDEX && pos.zIndex !== HOVER_Z_INDEX)
+          .map(pos => pos.zIndex || 0)) + 1;
+
         setNotePositions(prev => ({
           ...prev,
           [selectedNote.id]: {
             ...clickedNotePosition,
-            zIndex: prev[note.id].zIndex // 기존 배경 노트의 z-index 유지
+            zIndex: newZIndex // 새로운 z-index 할당
           }
         }));
         setBackgroundNotes(prev => [...prev, currentMainNote]);
+        
+        // 이전 메인 노트의 호버 효과 비활성화
+        setHoverDisabledNote(selectedNote.id);
       }
     }
 
@@ -1729,6 +1737,7 @@ export const NoteList = () => {
       if (!position) return null;
 
       const isTransitioning = recentlySwappedNote === note.id;
+      const isHoverDisabled = hoverDisabledNote === note.id;
 
       return (
         <Paper 
@@ -1740,10 +1749,10 @@ export const NoteList = () => {
             }
           }}
           onMouseEnter={(e) => {
-            if (isTransitioning) return;
+            if (isTransitioning || isHoverDisabled) return;
             
             // 현재 z-index 값을 저장
-            originalZIndexRef.current = position.zIndex || 1;
+            originalZIndexRef.current = position.zIndex;
             
             // 호버 시 z-index 업데이트
             setNotePositions(prev => ({
@@ -1755,16 +1764,19 @@ export const NoteList = () => {
             }));
           }}
           onMouseLeave={(e) => {
-            if (isTransitioning) return;
+            if (isTransitioning || isHoverDisabled) return;
 
             // 저장된 원래의 z-index 값으로 복구
-            setNotePositions(prev => ({
-              ...prev,
-              [note.id]: {
-                ...prev[note.id],
-                zIndex: originalZIndexRef.current
-              }
-            }));
+            if (originalZIndexRef.current !== undefined) {
+              setNotePositions(prev => ({
+                ...prev,
+                [note.id]: {
+                  ...prev[note.id],
+                  zIndex: originalZIndexRef.current
+                }
+              }));
+              originalZIndexRef.current = undefined;
+            }
           }}
           sx={{ 
             position: 'absolute',
@@ -1793,10 +1805,9 @@ export const NoteList = () => {
             '&:active': {
               cursor: 'grabbing'
             },
-            '&:hover': (isTransitioning || recentlySwappedNote === note.id) ? {} : {
+            '&:hover': (isTransitioning || isHoverDisabled) ? {} : {
               opacity: 1,
               filter: 'none',
-              zIndex: HOVER_Z_INDEX,
               transform: draggedNoteId === note.id ?
                 `translate(
                   calc(-50% + ${position.x}px), 
