@@ -421,13 +421,17 @@ export const NoteList = () => {
   const [isNewFolderDialogOpen, setIsNewFolderDialogOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const navigate = useNavigate();
-  const isDragging = React.useRef(false);
+  const isDragging = useRef(false);
+  const dragStartPosition = useRef({ x: 0, y: 0 });
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
+  const draggedNotes = useRef(new Map<string, boolean>());
+  const dragDistance = useRef(0);
+  const dragStartTime = useRef(0);
   const [folderLayouts, setFolderLayouts] = useState<FolderLayout[]>([]);
   const [isLayoutSaving, setIsLayoutSaving] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [maxZIndex, setMaxZIndex] = useState(10);
-  const originalZIndexRef = useRef<number | undefined>(undefined);
+  const originalZIndexRef = useRef<Record<string, number>>({});  // 여러 노트의 원래 z-index를 저장하기 위해 객체로 변경
   
   // z-index 관련 상수 수정
   const MAIN_NOTE_Z_INDEX = 95;
@@ -436,7 +440,6 @@ export const NoteList = () => {
   const HOVER_Z_INDEX = 100; // 호버 시 메인 노트보다 더 높게 설정
 
   // 드래그 관련 상수와 ref를 컴포넌트 최상위에 선언
-  const dragStartPosition = React.useRef({ x: 0, y: 0 });
   const DRAG_THRESHOLD = 5;
 
   // Constants for layout calculations
@@ -850,19 +853,24 @@ export const NoteList = () => {
     return () => unsubscribe();
   }, [currentFolderId]);
 
-  // 드래그 종료 핸들러 수정 (Firebase 저장 로직 제거)
+  // 드래그 종료 핸들러 수정
   const handleDragEnd = (e: MouseEvent) => {
     if (!draggedNoteId || !isDragging.current) return;
 
     const finalX = e.clientX - dragStartPosition.current.x;
     const finalY = e.clientY - dragStartPosition.current.y;
 
+    // 겹치는 노트들 중 가장 높은 z-index 찾기
+    const highestZIndex = findHighestOverlappingZIndex(finalX, finalY, draggedNoteId);
+    const newZIndex = Math.max(1, highestZIndex + 1);
+
     setNotePositions(prev => ({
       ...prev,
       [draggedNoteId]: {
         ...prev[draggedNoteId],
         x: finalX,
-        y: finalY
+        y: finalY,
+        zIndex: newZIndex
       }
     }));
 
@@ -1743,18 +1751,48 @@ export const NoteList = () => {
         <Paper 
           key={note.id}
           elevation={3} 
-          onClick={(e) => {
-            if (!isDragging.current) {
-              handleNoteSelect(note);
+          onMouseDown={(e: React.MouseEvent<HTMLDivElement>) => {
+            if (e.button === 0) { // 좌클릭만 처리
+              e.preventDefault(); // 텍스트 선택 방지
+              e.stopPropagation(); // 이벤트 버블링 방지
+              isDragging.current = true;
+              dragDistance.current = 0;
+              dragStartTime.current = Date.now();
+              setDraggedNoteId(note.id);
+              dragStartPosition.current = {
+                x: e.clientX - (position.x || 0),
+                y: e.clientY - (position.y || 0)
+              };
+
+              // 드래그 시작 시 현재 z-index 저장
+              const currentPosition = notePositions[note.id];
+              if (currentPosition) {
+                originalZIndexRef.current[note.id] = currentPosition.zIndex || 1;
+              }
+
+              // 드래그 시작 시 z-index를 100으로 설정
+              setNotePositions(prev => ({
+                ...prev,
+                [note.id]: {
+                  ...prev[note.id],
+                  zIndex: HOVER_Z_INDEX
+                }
+              }));
             }
           }}
-          onMouseEnter={(e) => {
-            if (isTransitioning || isHoverDisabled) return;
+          onClick={(e: React.MouseEvent<HTMLDivElement>) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onMouseEnter={(e: React.MouseEvent<HTMLDivElement>) => {
+            if (isTransitioning || isHoverDisabled || isDragging.current) return;
             
-            // 현재 z-index 값을 저장
-            originalZIndexRef.current = position.zIndex;
+            const currentPosition = notePositions[note.id];
+            if (!currentPosition) return;
+
+            // 현재 z-index를 저장 (undefined인 경우 현재 position의 zIndex 사용)
+            originalZIndexRef.current[note.id] = currentPosition.zIndex || currentPosition.zIndex === 0 ? currentPosition.zIndex : 1;
             
-            // 호버 시 z-index 업데이트
             setNotePositions(prev => ({
               ...prev,
               [note.id]: {
@@ -1763,19 +1801,26 @@ export const NoteList = () => {
               }
             }));
           }}
-          onMouseLeave={(e) => {
-            if (isTransitioning || isHoverDisabled) return;
-
-            // 저장된 원래의 z-index 값으로 복구
-            if (originalZIndexRef.current !== undefined) {
+          onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
+            if (isTransitioning) return;
+            
+            // 드래그가 끝난 직후에는 z-index를 복원하지 않음
+            if (originalZIndexRef.current[note.id] !== undefined && !isDragging.current) {
+              const originalZIndex = originalZIndexRef.current[note.id];
               setNotePositions(prev => ({
                 ...prev,
                 [note.id]: {
                   ...prev[note.id],
-                  zIndex: originalZIndexRef.current
+                  zIndex: originalZIndex
                 }
               }));
-              originalZIndexRef.current = undefined;
+              // 복원 후 저장된 z-index 삭제
+              delete originalZIndexRef.current[note.id];
+            }
+            
+            // 마우스가 노트를 떠날 때 호버 비활성화 상태 해제
+            if (hoverDisabledNote === note.id) {
+              setHoverDisabledNote(null);
             }
           }}
           sx={{ 
@@ -1799,13 +1844,11 @@ export const NoteList = () => {
             transformOrigin: 'center center',
             borderRadius: '16px',
             zIndex: position.zIndex || 1,
-            cursor: 'grab',
+            cursor: isDragging.current && draggedNoteId === note.id ? 'grabbing' : 'grab',
             willChange: draggedNoteId === note.id ? 'transform' : 'auto',
             visibility: isTransitioning ? 'hidden' : 'visible',
-            '&:active': {
-              cursor: 'grabbing'
-            },
-            '&:hover': (isTransitioning || isHoverDisabled) ? {} : {
+            userSelect: 'none',
+            '&:hover': (isTransitioning || isHoverDisabled || isDragging.current) ? {} : {
               opacity: 1,
               filter: 'none',
               transform: draggedNoteId === note.id ?
@@ -1988,6 +2031,8 @@ export const NoteList = () => {
     
     Object.entries(notePositions).forEach(([noteId, position]) => {
       if (noteId !== currentNoteId && 
+          position.zIndex !== MAIN_NOTE_Z_INDEX &&
+          position.zIndex !== HOVER_Z_INDEX &&
           isNotesOverlapping(x, y, position.x, position.y)) {
         highestZIndex = Math.max(highestZIndex, position.zIndex || 0);
       }
@@ -1997,24 +2042,28 @@ export const NoteList = () => {
   };
 
   // 노트 간의 겹침 여부를 확인하는 함수 추가
-  const isNotesOverlapping = (note1X: number, note1Y: number, note2X: number, note2Y: number): boolean => {
-    const NOTE_WIDTH = 350 * BASE_SCALE;
-    const NOTE_HEIGHT = 250 * BASE_SCALE;
+  const isNotesOverlapping = (x1: number, y1: number, x2: number, y2: number): boolean => {
+    const noteWidth = BACKGROUND_NOTE_WIDTH * BASE_SCALE;
+    const noteHeight = BACKGROUND_NOTE_HEIGHT * BASE_SCALE;
     
-    const note1Left = note1X - NOTE_WIDTH / 2;
-    const note1Right = note1X + NOTE_WIDTH / 2;
-    const note1Top = note1Y - NOTE_HEIGHT / 2;
-    const note1Bottom = note1Y + NOTE_HEIGHT / 2;
+    const rect1 = {
+      left: x1 - noteWidth / 2,
+      right: x1 + noteWidth / 2,
+      top: y1 - noteHeight / 2,
+      bottom: y1 + noteHeight / 2
+    };
     
-    const note2Left = note2X - NOTE_WIDTH / 2;
-    const note2Right = note2X + NOTE_WIDTH / 2;
-    const note2Top = note2Y - NOTE_HEIGHT / 2;
-    const note2Bottom = note2Y + NOTE_HEIGHT / 2;
+    const rect2 = {
+      left: x2 - noteWidth / 2,
+      right: x2 + noteWidth / 2,
+      top: y2 - noteHeight / 2,
+      bottom: y2 + noteHeight / 2
+    };
     
-    return !(note1Right < note2Left || 
-             note1Left > note2Right || 
-             note1Bottom < note2Top || 
-             note1Top > note2Bottom);
+    return !(rect1.right < rect2.left || 
+             rect1.left > rect2.right || 
+             rect1.bottom < rect2.top || 
+             rect1.top > rect2.bottom);
   };
 
   // 레이아웃 저장 함수 수정
@@ -2567,6 +2616,99 @@ export const NoteList = () => {
       anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
     />
   );
+
+  // 전역 마우스 이벤트 핸들러 추가
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current || !draggedNoteId) return;
+
+      const deltaX = e.clientX - dragStartPosition.current.x;
+      const deltaY = e.clientY - dragStartPosition.current.y;
+      dragDistance.current = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+      // 드래그 중인 노트 위치 업데이트
+      setNotePositions(prev => ({
+        ...prev,
+        [draggedNoteId]: {
+          ...prev[draggedNoteId],
+          x: e.clientX - dragStartPosition.current.x,
+          y: e.clientY - dragStartPosition.current.y,
+          zIndex: HOVER_Z_INDEX // 드래그 중에는 z-index를 100으로 설정
+        }
+      }));
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (!isDragging.current || !draggedNoteId) return;
+
+      const deltaTime = Date.now() - dragStartTime.current;
+      const isQuickAction = deltaTime < 200 && dragDistance.current < 5;
+
+      if (isQuickAction) {
+        // 빠른 클릭으로 간주하고 노트 선택
+        const note = notes.find(n => n.id === draggedNoteId);
+        if (note) {
+          handleNoteSelect(note);
+        }
+      } else {
+        // 드래그로 간주하고 위치 업데이트
+        const finalX = e.clientX - dragStartPosition.current.x;
+        const finalY = e.clientY - dragStartPosition.current.y;
+
+        // 겹치는 노트들 중 가장 높은 z-index 찾기
+        let highestZIndex = 1;
+        Object.entries(notePositions).forEach(([noteId, pos]) => {
+          if (noteId !== draggedNoteId && 
+              pos.zIndex !== MAIN_NOTE_Z_INDEX && 
+              pos.zIndex !== HOVER_Z_INDEX) {
+            // 노트 간의 겹침 여부 확인
+            const isOverlapping = Math.abs(pos.x - finalX) < NOTE_WIDTH &&
+                                Math.abs(pos.y - finalY) < NOTE_HEIGHT;
+            
+            if (isOverlapping) {
+              highestZIndex = Math.max(highestZIndex, pos.zIndex || 1);
+            }
+          }
+        });
+
+        // 겹치는 노트들보다 1 높은 z-index 설정
+        const newZIndex = highestZIndex + 1;
+
+        // 드래그된 노트의 원래 z-index 삭제 (호버 효과 제거)
+        delete originalZIndexRef.current[draggedNoteId];
+
+        setNotePositions(prev => ({
+          ...prev,
+          [draggedNoteId]: {
+            ...prev[draggedNoteId],
+            x: finalX,
+            y: finalY,
+            zIndex: newZIndex // HOVER_Z_INDEX 대신 새로 계산된 z-index 사용
+          }
+        }));
+
+        // 드래그가 끝난 노트의 호버 효과 비활성화
+        setHoverDisabledNote(draggedNoteId);
+      }
+
+      // 드래그 상태 초기화
+      isDragging.current = false;
+      setDraggedNoteId(null);
+      dragDistance.current = 0;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggedNoteId, notes]);
+
+  // 노트의 크기 상수 추가 (컴포넌트 최상단에 추가)
+  const NOTE_WIDTH = 350;  // Paper 컴포넌트의 width와 동일하게 설정
+  const NOTE_HEIGHT = 250; // Paper 컴포넌트의 minHeight와 동일하게 설정
 
   return (
     <Box sx={{ display: 'flex', height: '100vh' }}>
