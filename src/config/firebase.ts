@@ -1,27 +1,23 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, connectAuthEmulator, inMemoryPersistence, setPersistence } from 'firebase/auth';
 import { 
   getFirestore, 
-  initializeFirestore,
+  connectFirestoreEmulator, 
+  CACHE_SIZE_UNLIMITED,
   persistentLocalCache,
-  persistentMultipleTabManager,
-  CACHE_SIZE_UNLIMITED
+  persistentMultipleTabManager 
 } from 'firebase/firestore';
 
+// Emulator 설정을 위한 최소한의 Firebase 설정
 const firebaseConfig = {
-  apiKey: "AIzaSyC8UNQlECkyPSRnEYp5SK7suFVEmzksqzY",
-  authDomain: "emotion-notepad-b9bcb.firebaseapp.com",
-  projectId: "emotion-notepad-b9bcb",
-  storageBucket: "emotion-notepad-b9bcb.firebasestorage.app",
-  messagingSenderId: "817361000108",
-  appId: "1:817361000108:web:718c7375c7d5411290f109",
-  cacheSizeBytes: CACHE_SIZE_UNLIMITED
+  projectId: "emotion-notepad-demo",
+  apiKey: "demo-key",
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with optimized settings
+// Initialize Firestore with optimized settings for emulator
 const firestoreSettings = {
   experimentalAutoDetectLongPolling: true,
   useFetchStreams: false,
@@ -31,8 +27,15 @@ const firestoreSettings = {
   })
 };
 
-// Initialize Firestore with settings
-export const db = initializeFirestore(app, firestoreSettings);
+// Initialize Firestore and Auth
+const db = getFirestore(app);
+const auth = getAuth(app);
 
-// Initialize Auth
-export const auth = getAuth(app); 
+// Emulator 연결 설정
+  console.log('Connecting to emulators...');
+  connectFirestoreEmulator(db, 'localhost', 9090);
+  connectAuthEmulator(auth, 'http://localhost:9095', { disableWarnings: true });
+  setPersistence(auth, inMemoryPersistence);
+  console.log('Connected to emulators');
+
+export { auth, db }; 

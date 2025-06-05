@@ -37,3 +37,6 @@ ui-debug.log*
 # Build
 build/
 coverage/
+
+# Firebase service account key
+serviceAccountKey.json

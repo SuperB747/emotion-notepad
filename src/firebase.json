@@ -21,7 +21,8 @@
   },
   "emulators": {
     "firestore": {
-      "port": 8080
+      "port": 8080,
+      "dataDir": ".firebase-data/firestore"
     },
     "hosting": {
       "port": 5000

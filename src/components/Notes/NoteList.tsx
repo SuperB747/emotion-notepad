@@ -28,6 +28,7 @@ import {
   MenuItem,
   Menu,
   CircularProgress,
+  Collapse,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -40,6 +41,8 @@ import {
   ArrowRight,
   CreateNewFolder as CreateNewFolderIcon,
   Check as CheckIcon,
+  Folder as FolderIcon,
+  FolderOpen as FolderOpenIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 
@@ -422,14 +425,13 @@ export const NoteList = () => {
   const [isLayoutSaving, setIsLayoutSaving] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [maxZIndex, setMaxZIndex] = useState(10);
-  const originalZIndexRef = React.useRef<Record<string, number>>({});
+  const originalZIndexRef = React.useRef<number | null>(null);
   
   // z-index 관련 상수 수정
-  const BASE_Z_INDEX = 10;
-  const Z_INDEX_GAP = 2; // 노트 간 z-index 간격을 2로 축소
   const MAIN_NOTE_Z_INDEX = 95;
+  const Z_INDEX_THRESHOLD = 80;
+  const Z_INDEX_REDUCTION = 50;
   const HOVER_Z_INDEX = 100; // 호버 시 메인 노트보다 더 높게 설정
-  const Z_INDEX_THRESHOLD = 90;
 
   // 드래그 관련 상수와 ref를 컴포넌트 최상위에 선언
   const dragStartPosition = React.useRef({ x: 0, y: 0 });
@@ -554,159 +556,258 @@ export const NoteList = () => {
     return true;
   };
 
-  // z-index 정규화 함수 추가
+  // z-index 정규화 함수
   const normalizeZIndices = (positions: Record<string, NotePosition>): Record<string, NotePosition> => {
-    // z-index 값들을 추출하고 정렬
-    const zIndices = Object.values(positions)
-      .map(pos => pos.zIndex || 1)
-      .sort((a, b) => a - b);
+    const backgroundNoteIds = Object.keys(positions).filter(
+      id => positions[id].zIndex !== MAIN_NOTE_Z_INDEX
+    );
+    
+    const maxZIndex = Math.max(...backgroundNoteIds.map(id => positions[id].zIndex || 0));
+    
+    if (maxZIndex >= Z_INDEX_THRESHOLD) {
+      const newPositions = { ...positions };
+      backgroundNoteIds.forEach(id => {
+        newPositions[id] = {
+          ...newPositions[id],
+          zIndex: (newPositions[id].zIndex || 0) - Z_INDEX_REDUCTION
+        };
+      });
+      return newPositions;
+    }
+    
+    return positions;
+  };
 
-    // 최대 z-index가 임계값을 넘지 않으면 정규화하지 않음
-    if (Math.max(...zIndices) < Z_INDEX_THRESHOLD) {
-      return positions;
+  // Firebase 업데이트 디바운스 ref 추가
+  const updateTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const pendingUpdatesRef = React.useRef<Record<string, NotePosition>>({});
+
+  // Firebase 업데이트를 디바운스하는 함수
+  const debouncedUpdateFirebase = useCallback((updates: Record<string, NotePosition>) => {
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
     }
 
-    // 모든 z-index 값을 50만큼 감소
-    const normalizedPositions = { ...positions };
-    Object.keys(normalizedPositions).forEach(noteId => {
-      normalizedPositions[noteId] = {
-        ...normalizedPositions[noteId],
-        zIndex: (normalizedPositions[noteId].zIndex || 1) - 50
-      };
-    });
+    // 대기 중인 업데이트와 병합
+    pendingUpdatesRef.current = {
+      ...pendingUpdatesRef.current,
+      ...updates
+    };
 
-    // maxZIndex도 함께 업데이트
-    setMaxZIndex(prev => Math.max(10, prev - 50));
+    updateTimeoutRef.current = setTimeout(async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) return;
 
-    return normalizedPositions;
-  };
+        const batch = writeBatch(db);
+        
+        // 대기 중인 모든 업데이트를 배치로 처리
+        Object.entries(pendingUpdatesRef.current).forEach(([noteId, position]) => {
+          const noteRef = doc(db, `users/${user.uid}/notes/${noteId}`);
+          batch.update(noteRef, { position });
+        });
+
+        await batch.commit();
+        pendingUpdatesRef.current = {}; // 성공적으로 업데이트된 후 초기화
+      } catch (error) {
+        console.error('Failed to update note positions:', error);
+        showSnackbar('노트 위치 저장에 실패했습니다.');
+      }
+    }, 1000); // 1초 디바운스
+  }, []);
 
   // 노트 선택 처리 함수 수정
   const handleNoteSelect = (note: Note) => {
-    // 이미 선택된 노트를 다시 클릭한 경우 무시
     if (selectedNote?.id === note.id) return;
 
     const oldMainNote = selectedNote;
     const clickedNotePosition = notePositions[note.id];
     
     // 클릭된 노트의 현재 z-index 저장
-    const clickedNoteZIndex = clickedNotePosition?.zIndex || 1;
+    originalZIndexRef.current = clickedNotePosition?.zIndex || 0;
 
-    // 1. 현재 폴더의 모든 노트 목록 준비
-    const currentFolderNotes = notes.filter(n => 
-      (n.folderId === currentFolderId || (!currentFolderId && !n.folderId))
-    );
-
-    // 2. 새로운 배경 노트 목록 생성 (선택된 노트 제외)
-    const newBackgroundNotes = currentFolderNotes.filter(n => n.id !== note.id);
-    
-    // 3. 새로운 위치 정보 객체 생성
     const newPositions = { ...notePositions };
+    const updates: Record<string, NotePosition> = {};
 
-    // 4. 이전 메인 노트 처리
+    // 이전 메인 노트 처리
     if (oldMainNote) {
-      // 이전 메인 노트를 배경 노트 목록에 추가
-      if (!newBackgroundNotes.find(n => n.id === oldMainNote.id)) {
-        newBackgroundNotes.push(oldMainNote);
-      }
-
-      // 이전 메인 노트는 클릭된 노트의 위치로 이동하고, 저장해둔 z-index 사용
-      newPositions[oldMainNote.id] = {
+      const oldMainPosition = {
+        ...notePositions[oldMainNote.id],
         x: clickedNotePosition.x,
         y: clickedNotePosition.y,
         rotate: clickedNotePosition.rotate,
-        zIndex: clickedNoteZIndex // 클릭된 노트의 원래 z-index 사용
+        zIndex: originalZIndexRef.current
       };
+      newPositions[oldMainNote.id] = oldMainPosition;
+      updates[oldMainNote.id] = oldMainPosition;
     }
 
-    // 5. 새로 선택된 노트는 중앙에 위치하고 메인 z-index 사용
-    newPositions[note.id] = {
+    // 새로 선택된 노트는 중앙에 위치하고 메인 z-index 사용
+    const newMainPosition = {
       x: 0,
       y: 0,
       rotate: 0,
       zIndex: MAIN_NOTE_Z_INDEX
     };
-      
-    // 6. 상태 업데이트
-    setSelectedNote(note);
+    newPositions[note.id] = newMainPosition;
+    updates[note.id] = newMainPosition;
+
+    // 상태 업데이트
     setNotePositions(newPositions);
-    setBackgroundNotes(newBackgroundNotes);
+    setSelectedNote(note);
     setEditedTitle(note.title || '');
     setEditedContent(note.content || '');
     setEditedColor(note.color || 'yellow');
     setIsEditing(false);
 
-    // 7. 최근 교체된 노트 표시
+    // 배경 노트 목록 업데이트
+    const newBackgroundNotes = notes.filter(n => {
+      const isInCurrentFolder = !currentFolderId || n.folderId === currentFolderId;
+      return n.id !== note.id && isInCurrentFolder;
+    });
+
     if (oldMainNote) {
-      setRecentlySwappedNote(oldMainNote.id);
-      setTimeout(() => {
-        setRecentlySwappedNote(null);
-      }, 300);
+      const isOldMainInCurrentFolder = !currentFolderId || oldMainNote.folderId === currentFolderId;
+      if (isOldMainInCurrentFolder && !newBackgroundNotes.find(n => n.id === oldMainNote.id)) {
+        newBackgroundNotes.push(oldMainNote);
+      }
+    }
+
+    setBackgroundNotes(newBackgroundNotes);
+
+    // Firebase 업데이트는 UI 전환 후에 수행
+    const user = auth.currentUser;
+    if (user) {
+      const batch = writeBatch(db);
+      
+      if (oldMainNote) {
+        const oldMainNoteRef = doc(db, `users/${user.uid}/notes/${oldMainNote.id}`);
+        batch.update(oldMainNoteRef, { position: newPositions[oldMainNote.id] });
+      }
+      
+      const newMainNoteRef = doc(db, `users/${user.uid}/notes/${note.id}`);
+      batch.update(newMainNoteRef, { position: newPositions[note.id] });
+      
+      batch.commit().catch(error => {
+        console.error('Failed to update note positions:', error);
+      });
     }
   };
 
-  // Modify useEffect for OCD mode changes
+  // 초기 노트 위치 설정 함수 수정
   useEffect(() => {
-    if (!selectedNote || notes.length === 0) return;
+    const user = auth.currentUser;
+    if (!user) return;
 
-    const newPositions = { ...notePositions };
+    const notesRef = collection(db, `users/${user.uid}/notes`);
+    const notesQuery = query(notesRef, orderBy('createdAt', 'asc'));
+
+    const unsubscribe = onSnapshot(notesQuery, async (snapshot) => {
+      const notesList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Note));
+      
+      setNotes(notesList);
+      
+      if ((!selectedNote || !notes.length) && notesList.length > 0) {
+        const firstNote = notesList[0];
+        const backgroundNotesList = notesList.filter(n => n.id !== firstNote.id);
+        
+        // 위치 정보가 없는 노트들 초기화
+        const notesToInitialize = backgroundNotesList.filter(note => !note.position);
+        
+        if (notesToInitialize.length > 0) {
+          const batch = writeBatch(db);
+          const initialPositions: Record<string, NotePosition> = {};
+
+          // 배경 노트들의 위치 초기화 (생성 순서대로 z-index 할당)
+          notesToInitialize.forEach((note, index) => {
+            const position = generateRandomPosition(index, initialPositions, note, backgroundNotesList);
+            const notePosition = {
+              ...position,
+              rotate: (Math.random() - 0.5) * 2 * MAX_ROTATION,
+              zIndex: index // 생성 순서대로 z-index 할당
+            };
+
+            initialPositions[note.id] = notePosition;
+            const noteRef = doc(db, `users/${user.uid}/notes/${note.id}`);
+            batch.update(noteRef, { position: notePosition });
+          });
+
+          // 메인 노트 위치 설정
+          const mainNotePosition = {
+            x: 0,
+            y: 0,
+            rotate: 0,
+            zIndex: MAIN_NOTE_Z_INDEX
+          };
+          
+          // 첫 번째 노트의 위치가 없거나 z-index가 MAIN_NOTE_Z_INDEX가 아닌 경우에만 업데이트
+          const firstNotePosition = firstNote.position as NotePosition | undefined;
+          if (!firstNotePosition || firstNotePosition.zIndex !== MAIN_NOTE_Z_INDEX) {
+            initialPositions[firstNote.id] = mainNotePosition;
+            const mainNoteRef = doc(db, `users/${user.uid}/notes/${firstNote.id}`);
+            batch.update(mainNoteRef, { position: mainNotePosition });
+          }
+
+          await batch.commit();
+          
+          setNotePositions(prev => ({
+            ...prev,
+            ...initialPositions
+          }));
+        } else {
+          // 모든 노트가 위치 정보를 가지고 있는 경우에도 메인 노트의 z-index 확인
+          const currentPosition = notePositions[firstNote.id];
+          if (!currentPosition || currentPosition.zIndex !== MAIN_NOTE_Z_INDEX) {
+            const mainNotePosition = {
+              ...(currentPosition || { x: 0, y: 0, rotate: 0 }),
+              zIndex: MAIN_NOTE_Z_INDEX
+            };
+            setNotePositions(prev => ({
+              ...prev,
+              [firstNote.id]: mainNotePosition
+            }));
+          }
+        }
+
+        setSelectedNote(firstNote);
+        setEditedTitle(firstNote.title || '');
+        setEditedContent(firstNote.content || '');
+        setEditedColor(firstNote.color || 'yellow');
+        setBackgroundNotes(backgroundNotesList);
+        setIsInitialLayout(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [currentFolderId]);
+
+  // 드래그 종료 시 z-index 업데이트 함수
+  const updateDraggedNoteZIndex = (
+    draggedNoteId: string,
+    finalX: number,
+    finalY: number,
+    currentPositions: Record<string, NotePosition>
+  ): Record<string, NotePosition> => {
+    const newPositions = { ...currentPositions };
+    const highestZIndex = findHighestOverlappingZIndex(finalX, finalY, draggedNoteId);
     
-    if (isOCDMode) {
-      // OCD 모드로 전환 시 회전값 저장 후 0으로 설정
-      const layoutData = folderLayouts.find(layout => layout.id === (currentFolderId || 'default'));
-      if (!layoutData) {
-        // 처음 OCD 모드로 전환하는 경우, 현재 회전값 저장
-        const originalRotations: Record<string, number> = {};
-        Object.keys(newPositions).forEach(noteId => {
-          originalRotations[noteId] = newPositions[noteId].rotate;
-          newPositions[noteId] = {
-            ...newPositions[noteId],
-            rotate: 0
-          };
-        });
-        // 현재 폴더의 레이아웃에 원래 회전값 저장
-        setFolderLayouts(prev => {
-          const filtered = prev.filter(layout => layout.id !== (currentFolderId || 'default'));
-          return [...filtered, {
-            id: currentFolderId || 'default',
-            positions: newPositions,
-            isOCDMode: true,
-            originalRotations
-          }];
-        });
-      } else {
-        // 이미 저장된 레이아웃이 있는 경우
-        Object.keys(newPositions).forEach(noteId => {
-          newPositions[noteId] = {
-            ...newPositions[noteId],
-            rotate: 0
-          };
-        });
-      }
-    } else {
-      // 일반 모드로 전환 시 원래 회전값 복원
-      const layoutData = folderLayouts.find(layout => layout.id === (currentFolderId || 'default'));
-      if (layoutData?.originalRotations) {
-        Object.keys(newPositions).forEach(noteId => {
-          newPositions[noteId] = {
-            ...newPositions[noteId],
-            rotate: layoutData.originalRotations![noteId] || 0
-          };
-        });
-      }
-    }
-
-    // 메인 노트는 항상 중앙에 유지
-    if (selectedNote) {
-      newPositions[selectedNote.id] = {
-        x: 0,
-        y: 0,
-        rotate: 0
+    if (highestZIndex >= 0) {
+      newPositions[draggedNoteId] = {
+        ...newPositions[draggedNoteId],
+        zIndex: highestZIndex + 1
       };
+      
+      // z-index가 임계값을 넘으면 정규화
+      if (highestZIndex + 1 >= Z_INDEX_THRESHOLD) {
+        return normalizeZIndices(newPositions);
+      }
     }
     
-    setNotePositions(newPositions);
-  }, [isOCDMode, currentFolderId, folderLayouts]);
+    return newPositions;
+  };
 
   // 랜덤 위치 생성 함수 수정
   const generateRandomPosition = (
@@ -1229,7 +1330,7 @@ export const NoteList = () => {
         sx={{
           position: 'fixed',
           top: 16,
-          left: 'calc(50% + 150px)', // 300px(왼쪽 메뉴 너비)의 절반만큼 오른쪽으로 이동
+          left: '50%',
           transform: 'translateX(-50%)',
           bgcolor: 'rgba(255, 255, 255, 0.8)',
           padding: '6px 16px',
@@ -1265,211 +1366,207 @@ export const NoteList = () => {
   // 노트 컨텐츠 영역 렌더링 수정
   const renderNoteContent = () => {
     return (
-      <>
-        {renderFolderSelect()}
-        <Box sx={{ 
-          position: 'relative',
-          width: '100%',
-          maxWidth: '1200px',
-          height: '800px',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          transform: 'translateY(-8%)',
-          margin: '0 auto',
-          pt: 0,
-        }}>
-          {renderBackgroundNotes(filteredBackgroundNotes)}
-          {selectedNote && (
-            <Paper
-              elevation={8}
-              sx={{
+      <Box sx={{ 
+        position: 'relative',
+        width: '100%',
+        maxWidth: '1200px',
+        height: '800px',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        transform: 'translateY(-8%)',
+        margin: '0 auto',
+        pt: 0,
+      }}>
+        {renderBackgroundNotes(filteredBackgroundNotes)}
+        {selectedNote && (
+          <Paper
+            elevation={8}
+            sx={{
+              position: 'absolute',
+              width: '500px',
+              minHeight: '400px',
+              p: 3,
+              bgcolor: getBackgroundColor(selectedNote, isEditing, editedColor),
+              borderRadius: '16px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              zIndex: MAIN_NOTE_Z_INDEX,
+              opacity: 1,
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -42%)',
+              filter: 'blur(0px)',
+              '&::before': {
+                content: '""',
                 position: 'absolute',
-                width: '500px',
-                minHeight: '400px',
-                p: 3,
-                bgcolor: getBackgroundColor(selectedNote, isEditing, editedColor),
-                borderRadius: '16px',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                zIndex: MAIN_NOTE_Z_INDEX,
-                opacity: 1,
+                top: 0,
                 left: '50%',
-                top: '50%',
-                transform: 'translate(-50%, -42%)',
-                filter: 'blur(0px)',
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  width: '80px',
-                  height: '25px',
-                  bgcolor: '#9cbb9c',
-                  borderRadius: '0 0 12px 12px',
-                  boxShadow: 'inset 0 -5px 8px rgba(0,0,0,0.1)',
-                },
-              }}
-            >
-              {isEditing ? (
-                <>
-                  <TextField
-                    fullWidth
-                    value={editedTitle}
-                    onChange={(e) => setEditedTitle(e.target.value)}
-                    variant="standard"
-                    sx={{
-                      mb: 2,
-                      '& input': {
-                        fontSize: '2rem',
-                        fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
-                        color: '#2c5530',
-                        textAlign: 'center',
-                      },
-                    }}
-                  />
-                  
-                  {/* 색상 선택 버튼 그룹 */}
-                  <Box sx={{ 
-                    display: 'flex', 
-                    justifyContent: 'center', 
-                    gap: 1, 
-                    mb: 3,
-                    '& button': {
-                      width: 36,
-                      height: 36,
-                      minWidth: 'unset',
-                      p: 0,
-                      borderRadius: '50%',
-                      border: '2px solid transparent',
-                      '&.selected': {
-                        border: '2px solid #666',
-                      }
-                    }
-                  }}>
-                    {Object.entries(NOTE_COLORS).map(([colorKey, colorData]) => (
-                      <Button
-                        key={colorKey}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditedColor(colorKey as NoteColor);
-                        }}
-                        className={editedColor === colorKey ? 'selected' : ''}
-                        sx={{
-                          bgcolor: colorData.bg,
-                          '&:hover': {
-                            bgcolor: colorData.hover,
-                          }
-                        }}
-                        title={colorData.name}
-                      />
-                    ))}
-                  </Box>
-
-                  <TextField
-                    fullWidth
-                    multiline
-                    rows={12}
-                    value={editedContent}
-                    onChange={(e) => setEditedContent(e.target.value)}
-                    variant="standard"
-                    sx={{
-                      '& textarea': {
-                        fontSize: '1.1rem',
-                        fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
-                        color: '#444',
-                        lineHeight: 1.8,
-                      },
-                    }}
-                  />
-                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 2 }}>
-                    <Button
-                      startIcon={<CancelIcon />}
-                      onClick={handleCancel}
-                      sx={{ color: '#666' }}
-                    >
-                      취소
-                    </Button>
-                    <Button
-                      startIcon={<SaveIcon />}
-                      onClick={handleSave}
-                      sx={{
-                        bgcolor: '#9cbb9c',
-                        color: 'white',
-                        '&:hover': {
-                          bgcolor: '#7a9e7a',
-                        },
-                      }}
-                    >
-                      저장
-                    </Button>
-                  </Box>
-                </>
-              ) : (
-                <>
-                  <Box sx={{
-                    position: 'relative',
+                transform: 'translateX(-50%)',
+                width: '80px',
+                height: '25px',
+                bgcolor: '#9cbb9c',
+                borderRadius: '0 0 12px 12px',
+                boxShadow: 'inset 0 -5px 8px rgba(0,0,0,0.1)',
+              },
+            }}
+          >
+            {isEditing ? (
+              <>
+                <TextField
+                  fullWidth
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
+                  variant="standard"
+                  sx={{
                     mb: 2,
-                    textAlign: 'center'
-                  }}>
-                    <Typography 
-                      variant="h4" 
-                      sx={{ 
-                        color: '#2c5530',
-                        fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
-                        fontWeight: 'bold',
-                        textShadow: '1px 1px 0 rgba(255,255,255,0.5)',
-                        fontSize: '1.6rem',
-                      }}
-                    >
-                      {selectedNote.title}
-                    </Typography>
-                  </Box>
-
-                  <Box sx={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    mb: 3
-                  }}>
-                    <Typography 
-                      variant="caption"
-                      sx={{
-                        color: '#666',
-                        fontStyle: 'italic',
-                      }}
-                    >
-                      {selectedNote.createdAt ? formatDate(selectedNote.createdAt) : ''}
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <IconButton onClick={handleEditClick} size="small" sx={{ color: '#9cbb9c', p: 0.5 }}>
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton onClick={() => handleDeleteClick(selectedNote.id)} size="small" color="error" sx={{ p: 0.5, color: '#9cbb9c' }}>
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Box>
-                  </Box>
-
-                  <Typography
-                    sx={{
-                      whiteSpace: 'pre-wrap',
-                      lineHeight: 1.8,
-                      color: '#444',
+                    '& input': {
+                      fontSize: '2rem',
                       fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+                      color: '#2c5530',
+                      textAlign: 'center',
+                    },
+                  }}
+                />
+                
+                {/* 색상 선택 버튼 그룹 */}
+                <Box sx={{ 
+                  display: 'flex', 
+                  justifyContent: 'center', 
+                  gap: 1, 
+                  mb: 3,
+                  '& button': {
+                    width: 36,
+                    height: 36,
+                    minWidth: 'unset',
+                    p: 0,
+                    borderRadius: '50%',
+                    border: '2px solid transparent',
+                    '&.selected': {
+                      border: '2px solid #666',
+                    }
+                  }
+                }}>
+                  {Object.entries(NOTE_COLORS).map(([colorKey, colorData]) => (
+                    <Button
+                      key={colorKey}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditedColor(colorKey as NoteColor);
+                      }}
+                      className={editedColor === colorKey ? 'selected' : ''}
+                      sx={{
+                        bgcolor: colorData.bg,
+                        '&:hover': {
+                          bgcolor: colorData.hover,
+                        }
+                      }}
+                      title={colorData.name}
+                    />
+                  ))}
+                </Box>
+
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={12}
+                  value={editedContent}
+                  onChange={(e) => setEditedContent(e.target.value)}
+                  variant="standard"
+                  sx={{
+                    '& textarea': {
                       fontSize: '1.1rem',
+                      fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+                      color: '#444',
+                      lineHeight: 1.8,
+                    },
+                  }}
+                />
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 2 }}>
+                  <Button
+                    startIcon={<CancelIcon />}
+                    onClick={handleCancel}
+                    sx={{ color: '#666' }}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    startIcon={<SaveIcon />}
+                    onClick={handleSave}
+                    sx={{
+                      bgcolor: '#9cbb9c',
+                      color: 'white',
+                      '&:hover': {
+                        bgcolor: '#7a9e7a',
+                      },
                     }}
                   >
-                    {selectedNote.content}
+                    저장
+                  </Button>
+                </Box>
+              </>
+            ) : (
+              <>
+                <Box sx={{
+                  position: 'relative',
+                  mb: 2,
+                  textAlign: 'center'
+                }}>
+                  <Typography 
+                    variant="h4" 
+                    sx={{ 
+                      color: '#2c5530',
+                      fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+                      fontWeight: 'bold',
+                      textShadow: '1px 1px 0 rgba(255,255,255,0.5)',
+                      fontSize: '1.6rem',
+                    }}
+                  >
+                    {selectedNote.title}
                   </Typography>
-                </>
-              )}
-            </Paper>
-          )}
-        </Box>
-        {renderNewFolderDialog()}
-      </>
+                </Box>
+
+                <Box sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  mb: 3
+                }}>
+                  <Typography 
+                    variant="caption"
+                    sx={{
+                      color: '#666',
+                      fontStyle: 'italic',
+                    }}
+                  >
+                    {selectedNote.createdAt ? formatDate(selectedNote.createdAt) : ''}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <IconButton onClick={handleEditClick} size="small" sx={{ color: '#9cbb9c', p: 0.5 }}>
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton onClick={() => handleDeleteClick(selectedNote.id)} size="small" color="error" sx={{ p: 0.5, color: '#9cbb9c' }}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                </Box>
+
+                <Typography
+                  sx={{
+                    whiteSpace: 'pre-wrap',
+                    lineHeight: 1.8,
+                    color: '#444',
+                    fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+                    fontSize: '1.1rem',
+                  }}
+                >
+                  {selectedNote.content}
+                </Typography>
+              </>
+            )}
+          </Paper>
+        )}
+      </Box>
     );
   };
 
@@ -1516,6 +1613,8 @@ export const NoteList = () => {
       const position = notePositions[note.id];
       if (!position) return null;
 
+      const isTransitioning = selectedNote?.id === note.id || recentlySwappedNote === note.id;
+
       return (
         <Paper 
           key={note.id}
@@ -1526,11 +1625,13 @@ export const NoteList = () => {
             }
           }}
           onMouseEnter={(e) => {
-            // 현재 z-index 값을 저장
-            const currentZIndex = notePositions[note.id].zIndex || 1;
-            originalZIndexRef.current[note.id] = currentZIndex;
+            if (isTransitioning) return;
             
-            // 호버 시 z-index 업데이트 (메인 노트보다 높게)
+            // 현재 z-index 값을 저장
+            const currentZIndex = notePositions[note.id].zIndex || 0;
+            originalZIndexRef.current = currentZIndex;
+            
+            // 호버 시 z-index 업데이트
             setNotePositions(prev => ({
               ...prev,
               [note.id]: {
@@ -1540,13 +1641,15 @@ export const NoteList = () => {
             }));
           }}
           onMouseLeave={(e) => {
+            if (isTransitioning) return;
+
             if (recentlySwappedNote === note.id) {
               setRecentlySwappedNote(null);
             }
             
             // 저장된 원래의 z-index 값으로 복구
-            const originalZIndex = originalZIndexRef.current[note.id];
-            if (originalZIndex) {
+            const originalZIndex = originalZIndexRef.current;
+            if (originalZIndex !== null) {
               setNotePositions(prev => ({
                 ...prev,
                 [note.id]: {
@@ -1554,124 +1657,8 @@ export const NoteList = () => {
                   zIndex: originalZIndex
                 }
               }));
-              delete originalZIndexRef.current[note.id];
+              originalZIndexRef.current = null;
             }
-          }}
-          onMouseDown={(e) => {
-            // 우클릭 처리
-            if (e.button === 2) {
-              e.preventDefault();
-              e.stopPropagation();
-              setContextMenu({
-                mouseX: e.clientX,
-                mouseY: e.clientY,
-                noteId: note.id
-              });
-              return;
-            }
-
-            // 현재 z-index 저장
-            originalZIndexRef.current[note.id] = notePositions[note.id].zIndex || 1;
-            
-            dragStartPosition.current = {
-              x: e.clientX,
-              y: e.clientY
-            };
-
-            // 드래그 시작 위치 저장
-            const startPos = {
-              x: position.x,
-              y: position.y,
-              rotate: position.rotate,
-              zIndex: position.zIndex || 1
-            };
-
-            isDragging.current = false;
-
-            const handleMouseMove = (e: MouseEvent) => {
-              const deltaX = Math.abs(e.clientX - dragStartPosition.current.x);
-              const deltaY = Math.abs(e.clientY - dragStartPosition.current.y);
-              
-              if (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD) {
-                isDragging.current = true;
-                setDraggedNoteId(note.id);
-                
-                // 드래그 중인 노트의 위치만 업데이트
-                const newX = startPos.x + (e.clientX - dragStartPosition.current.x);
-                const newY = startPos.y + (e.clientY - dragStartPosition.current.y);
-
-                // 드래그 중인 노트의 위치만 업데이트하고 다른 노트들은 그대로 유지
-                setNotePositions(prev => ({
-                  ...prev,
-                  [note.id]: {
-                    ...prev[note.id],
-                    x: newX,
-                    y: newY,
-                    zIndex: HOVER_Z_INDEX
-                  }
-                }));
-              }
-            };
-
-            const handleMouseUp = (e: MouseEvent) => {
-              document.removeEventListener('mousemove', handleMouseMove);
-              document.removeEventListener('mouseup', handleMouseUp);
-
-              const deltaX = Math.abs(e.clientX - dragStartPosition.current.x);
-              const deltaY = Math.abs(e.clientY - dragStartPosition.current.y);
-
-              if (isDragging.current && (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD)) {
-                // 드래그가 끝난 노트의 최종 위치 계산
-                const finalX = startPos.x + (e.clientX - dragStartPosition.current.x);
-                const finalY = startPos.y + (e.clientY - dragStartPosition.current.y);
-
-                // 임시로 위치만 업데이트
-                const tempPositions = {
-                  ...notePositions,
-                  [note.id]: {
-                    ...startPos,
-                    x: finalX,
-                    y: finalY
-                  }
-                };
-
-                // z-index 업데이트 (항상 겹치는 노트들보다 1 높게)
-                const updatedPositions = updateDraggedNoteZIndex(
-                  note.id,
-                  finalX,
-                  finalY,
-                  tempPositions
-                );
-
-                // 위치 정보 업데이트
-                setNotePositions(updatedPositions);
-
-                // Firebase에 현재 노트의 위치 저장
-                saveNotePosition(note.id, updatedPositions[note.id]);
-              } else {
-                // 드래그가 아닌 경우 원래 z-index로 복구
-                const originalZIndex = originalZIndexRef.current[note.id];
-                if (originalZIndex) {
-                  setNotePositions(prev => ({
-                    ...prev,
-                    [note.id]: {
-                      ...prev[note.id],
-                      zIndex: originalZIndex
-                    }
-                  }));
-                }
-              }
-
-              // cleanup
-              delete originalZIndexRef.current[note.id];
-              setTimeout(() => {
-                isDragging.current = false;
-                setDraggedNoteId(null);
-              }, 100);
-            };
-
-            document.addEventListener('mousemove', handleMouseMove);
-            document.addEventListener('mouseup', handleMouseUp);
           }}
           sx={{ 
             position: 'absolute',
@@ -1687,7 +1674,7 @@ export const NoteList = () => {
             ) 
             scale(${BASE_SCALE})
             rotate(${position.rotate}deg)`,
-            opacity: 0.85,
+            opacity: isTransitioning ? 0 : 0.85,
             transition: draggedNoteId === note.id ? 'none' :
               isInitialLayout ? 'none' : 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
             filter: 'none',
@@ -1696,10 +1683,11 @@ export const NoteList = () => {
             zIndex: position.zIndex || 1,
             cursor: 'grab',
             willChange: draggedNoteId === note.id ? 'transform' : 'auto',
+            visibility: isTransitioning ? 'hidden' : 'visible',
             '&:active': {
               cursor: 'grabbing'
             },
-            '&:hover': recentlySwappedNote === note.id ? {} : {
+            '&:hover': (isTransitioning || recentlySwappedNote === note.id) ? {} : {
               opacity: 1,
               filter: 'none',
               transform: draggedNoteId === note.id ?
@@ -1854,7 +1842,42 @@ export const NoteList = () => {
     </Menu>
   );
 
-  // Modify saveFolderLayout function
+  // 겹치는 노트들 중 가장 높은 z-index를 찾는 함수
+  const findHighestOverlappingZIndex = (x: number, y: number, currentNoteId: string): number => {
+    let highestZIndex = -1;
+    
+    Object.entries(notePositions).forEach(([noteId, position]) => {
+      if (noteId !== currentNoteId && 
+          isNotesOverlapping(x, y, position.x, position.y)) {
+        highestZIndex = Math.max(highestZIndex, position.zIndex || 0);
+      }
+    });
+    
+    return highestZIndex;
+  };
+
+  // 노트 간의 겹침 여부를 확인하는 함수 추가
+  const isNotesOverlapping = (note1X: number, note1Y: number, note2X: number, note2Y: number): boolean => {
+    const NOTE_WIDTH = 350 * BASE_SCALE;
+    const NOTE_HEIGHT = 250 * BASE_SCALE;
+    
+    const note1Left = note1X - NOTE_WIDTH / 2;
+    const note1Right = note1X + NOTE_WIDTH / 2;
+    const note1Top = note1Y - NOTE_HEIGHT / 2;
+    const note1Bottom = note1Y + NOTE_HEIGHT / 2;
+    
+    const note2Left = note2X - NOTE_WIDTH / 2;
+    const note2Right = note2X + NOTE_WIDTH / 2;
+    const note2Top = note2Y - NOTE_HEIGHT / 2;
+    const note2Bottom = note2Y + NOTE_HEIGHT / 2;
+    
+    return !(note1Right < note2Left || 
+             note1Left > note2Right || 
+             note1Bottom < note2Top || 
+             note1Top > note2Bottom);
+  };
+
+  // 레이아웃 저장 함수 수정
   const saveFolderLayout = async () => {
     try {
       const user = auth.currentUser;
@@ -1862,26 +1885,19 @@ export const NoteList = () => {
 
       setIsLayoutSaving(true);
 
-      // 현재 상태를 변경하지 않고 저장용 복사본 생성
-      const positionsForSave = { ...notePositions };
-
-      // Create layout data for current folder
       const layoutData: FolderLayout = {
         id: currentFolderId || 'default',
-        positions: positionsForSave,
+        positions: notePositions,
         isOCDMode: isOCDMode,
         originalRotations: isOCDMode ? 
-          folderLayouts.find(layout => layout.id === (currentFolderId || 'default'))?.originalRotations : 
           Object.fromEntries(
-            Object.entries(positionsForSave).map(([noteId, pos]) => [noteId, pos.rotate])
-          )
+            Object.entries(notePositions).map(([noteId, pos]) => [noteId, pos.rotate])
+          ) : undefined
       };
 
-      // Save to Firestore
       const layoutRef = doc(db, `users/${user.uid}/folderLayouts/${layoutData.id}`);
       await setDoc(layoutRef, layoutData);
 
-      // Update folderLayouts state without modifying current positions
       setFolderLayouts(prev => {
         const filtered = prev.filter(layout => layout.id !== layoutData.id);
         return [...filtered, layoutData];
@@ -2029,259 +2045,349 @@ export const NoteList = () => {
     return nextIndex;
   };
 
-  // 노트 간의 겹침 여부를 확인하는 함수 추가
-  const isNotesOverlapping = (note1X: number, note1Y: number, note2X: number, note2Y: number): boolean => {
-    const NOTE_WIDTH = 350 * BASE_SCALE;
-    const NOTE_HEIGHT = 250 * BASE_SCALE;
-    
-    const note1Left = note1X - NOTE_WIDTH / 2;
-    const note1Right = note1X + NOTE_WIDTH / 2;
-    const note1Top = note1Y - NOTE_HEIGHT / 2;
-    const note1Bottom = note1Y + NOTE_HEIGHT / 2;
-    
-    const note2Left = note2X - NOTE_WIDTH / 2;
-    const note2Right = note2X + NOTE_WIDTH / 2;
-    const note2Top = note2Y - NOTE_HEIGHT / 2;
-    const note2Bottom = note2Y + NOTE_HEIGHT / 2;
-    
-    return !(note1Right < note2Left || 
-             note1Left > note2Right || 
-             note1Bottom < note2Top || 
-             note1Top > note2Bottom);
+  // 폴더 토글 상태 관리
+  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
+
+  // 폴더 토글 핸들러
+  const handleFolderToggle = (folderId: string) => {
+    setOpenFolders(prev => ({
+      ...prev,
+      [folderId]: !prev[folderId]
+    }));
   };
 
-  // 겹치는 노트들 중 가장 높은 z-index를 찾는 함수 수정
-  const findHighestOverlappingZIndex = (x: number, y: number, currentNoteId: string): number => {
-    let highestZIndex = 0;
-    
-    Object.entries(notePositions).forEach(([noteId, position]) => {
-      if (noteId !== currentNoteId && // 현재 노트 제외
-          isNotesOverlapping(x, y, position.x, position.y)) {
-        highestZIndex = Math.max(highestZIndex, position.zIndex || 1);
-      }
-    });
-    
-    // 겹치는 노트가 없으면 현재 maxZIndex 반환
-    return highestZIndex === 0 ? maxZIndex : highestZIndex;
-  };
-
-  // 특정 영역의 겹치는 노트들을 모두 찾는 함수
-  const findOverlappingNotes = (x: number, y: number, currentNoteId: string): string[] => {
-    const overlappingNotes: string[] = [];
-    
-    Object.entries(notePositions).forEach(([noteId, position]) => {
-      if (noteId !== currentNoteId && 
-          isNotesOverlapping(x, y, position.x, position.y)) {
-        overlappingNotes.push(noteId);
-      }
-    });
-    
-    return overlappingNotes;
-  };
-
-  // 겹치는 노트들의 z-index를 재정렬하는 함수
-  const reorderOverlappingNotes = (
-    x: number, 
-    y: number, 
-    draggedNoteId: string,
-    currentPositions: Record<string, NotePosition>
-  ): Record<string, NotePosition> => {
-    // 1. 겹치는 노트들 찾기
-    const overlappingNotes = findOverlappingNotes(x, y, draggedNoteId);
-    
-    // 2. 현재 위치 정보 복사
-    const newPositions = { ...currentPositions };
-    
-    // 3. 겹치는 노트들의 z-index 정렬
-    const notesToUpdate = [...overlappingNotes, draggedNoteId];
-    
-    // z-index 기준으로 정렬 (드래그된 노트 제외)
-    overlappingNotes.sort((a, b) => 
-      (currentPositions[a].zIndex || 0) - (currentPositions[b].zIndex || 0)
-    );
-
-    // 4. z-index 재할당
-    let currentZ = BASE_Z_INDEX;
-    
-    // 겹치는 노트들 먼저 처리
-    overlappingNotes.forEach(noteId => {
-      newPositions[noteId] = {
-        ...newPositions[noteId],
-        zIndex: currentZ
-      };
-      currentZ += Z_INDEX_GAP;
-    });
-    
-    // 드래그된 노트를 가장 위에 배치
-    newPositions[draggedNoteId] = {
-      ...newPositions[draggedNoteId],
-      zIndex: currentZ
-    };
-
-    return newPositions;
-  };
-
-  // 드래그된 노트의 z-index를 업데이트하는 함수
-  const updateDraggedNoteZIndex = (
-    draggedNoteId: string,
-    finalX: number,
-    finalY: number,
-    currentPositions: Record<string, NotePosition>
-  ): Record<string, NotePosition> => {
-    const newPositions = { ...currentPositions };
-    
-    // 1. 겹치는 노트들 찾기
-    const overlappingNotes = Object.entries(currentPositions)
-      .filter(([id, pos]) => 
-        id !== draggedNoteId && 
-        isNotesOverlapping(finalX, finalY, pos.x, pos.y)
-      );
-
-    if (overlappingNotes.length === 0) {
-      // 겹치는 노트가 없으면 현재 z-index 유지
-      return newPositions;
-    }
-
-    // 2. 겹치는 노트들 중 가장 높은 z-index 찾기
-    const maxZ = Math.max(
-      ...overlappingNotes.map(([_, pos]) => pos.zIndex || BASE_Z_INDEX)
-    );
-
-    // 3. 드래그된 노트를 가장 위로 올리기
-    newPositions[draggedNoteId] = {
-      ...newPositions[draggedNoteId],
-      zIndex: maxZ + 1
-    };
-
-    return newPositions;
-  };
-
-  return (
-    <Box sx={{ 
-      position: 'relative',
-      height: '100vh',
-      width: '100%',
-      display: 'flex',
-      zIndex: 1,
-    }}>
-      {/* 메모 목록 */}
-      <Paper 
-        elevation={3} 
-        sx={{ 
-          width: 300, 
-          bgcolor: 'rgba(255, 255, 255, 0.9)',
-          backdropFilter: 'blur(10px)',
-          display: 'flex', 
-          flexDirection: 'column',
-          borderRight: '1px solid rgba(0, 0, 0, 0.1)',
-          overflow: 'auto',
-        }}
-      >
-        {/* 사용자 정보 */}
-        <Box sx={{ 
-          p: 2, 
-          borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          bgcolor: 'rgba(158, 187, 166, 0.4)',
-        }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Avatar sx={{ bgcolor: '#9cbb9c' }}>
-              {auth.currentUser?.email?.[0].toUpperCase() || 'U'}
-            </Avatar>
-            <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                {auth.currentUser?.email?.split('@')[0]}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                메모 {notes.length}개
-              </Typography>
-            </Box>
-          </Box>
-          <IconButton onClick={handleLogout} size="small">
-            <ExitToAppIcon />
-          </IconButton>
-        </Box>
-
-        {renderNoteList()}
-      </Paper>
-
-      {/* 메모 내용 */}
-      <Box sx={{ 
-        flex: 1, 
-        p: 3, 
-        overflow: 'auto',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'flex-start',
-        pt: 4,
-      }}>
-        {/* 상단 고정 요소들 */}
-        {renderBoardTitle()}
-        {renderOCDToggle()}
-
-        {/* 노트 컨텐츠 영역 */}
-        <Box sx={{ 
-          flex: 1,
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          position: 'relative',
-        }}>
-          {notes.length > 0 ? renderNoteContent() : (
-            <Typography 
-              color="text.secondary"
-              sx={{
-                fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
-                fontSize: '1.2rem',
+  // Root 폴더의 노트 목록 렌더링
+  const renderRootNotes = () => {
+    const rootNotes = notes.filter(note => !note.folderId);
+    return (
+      <List component="div" disablePadding>
+        {rootNotes.map(note => (
+          <ListItemButton
+            key={note.id}
+            selected={selectedNote?.id === note.id}
+            onClick={() => setSelectedNote(note)}
+            sx={{
+              pl: 4,
+              '&.Mui-selected': {
+                bgcolor: 'rgba(158, 187, 166, 0.2)',
+                '&:hover': {
+                  bgcolor: 'rgba(158, 187, 166, 0.3)',
+                },
+              },
+            }}
+          >
+            <ListItemIcon>
+              <NoteIcon />
+            </ListItemIcon>
+            <ListItemText 
+              primary={note.title}
+              secondary={formatDate(note.createdAt)}
+              primaryTypographyProps={{
+                style: { 
+                  fontWeight: selectedNote?.id === note.id ? 600 : 400,
+                  color: '#2c5530'
+                }
+              }}
+            />
+            <IconButton
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteNote(note.id);
               }}
             >
-              왼쪽에서 메모를 선택해주세요
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </ListItemButton>
+        ))}
+      </List>
+    );
+  };
+
+  // 왼쪽 사이드바 렌더링
+  const renderSidebar = () => (
+    <Paper 
+      elevation={3} 
+      sx={{ 
+        width: 280,
+        height: '100vh',
+        bgcolor: 'background.paper',
+        borderRight: '1px solid rgba(0, 0, 0, 0.12)',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      {/* 사용자 정보 */}
+      <Box sx={{ 
+        p: 2, 
+        borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        bgcolor: 'rgba(158, 187, 166, 0.4)',
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Avatar sx={{ bgcolor: '#9cbb9c' }}>
+            {auth.currentUser?.email?.[0].toUpperCase() || 'U'}
+          </Avatar>
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              {auth.currentUser?.email?.split('@')[0]}
             </Typography>
-          )}
+            <Typography variant="caption" color="text.secondary">
+              메모 {notes.length}개
+            </Typography>
+          </Box>
         </Box>
+        <IconButton onClick={handleLogout} size="small">
+          <ExitToAppIcon />
+        </IconButton>
       </Box>
 
-      {/* 새 메모 작성 버튼 */}
-      <Fab
-        color="primary"
-        sx={{
-          position: 'fixed',
-          bottom: 16,
-          right: 16,
-          bgcolor: '#9cbb9c',
-          '&:hover': {
-            bgcolor: '#7a9e7a',
-          },
-        }}
-        onClick={() => navigate('/notes/new')}
-      >
-        <AddIcon />
-      </Fab>
+      {/* 폴더 및 노트 목록 */}
+      <List sx={{ flex: 1, overflow: 'auto' }}>
+        {/* 새 폴더 만들기 버튼 */}
+        <ListItemButton onClick={() => setIsNewFolderDialogOpen(true)}>
+          <ListItemIcon>
+            <CreateNewFolderIcon />
+          </ListItemIcon>
+          <ListItemText primary="새 폴더 만들기" />
+        </ListItemButton>
 
-      {/* 삭제 확인 다이얼로그 */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>메모 삭제</DialogTitle>
-        <DialogContent>
-          <Typography>이 메모를 삭제하시겠습니까?</Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>취소</Button>
-          <Button onClick={handleDeleteConfirm} color="error">삭제</Button>
-        </DialogActions>
-      </Dialog>
+        {/* Root 폴더 (전체 보기) */}
+        <ListItemButton
+          selected={!currentFolderId}
+          onClick={() => handleFolderChange(null)}
+          sx={{
+            '&.Mui-selected': {
+              bgcolor: 'rgba(158, 187, 166, 0.2)',
+              '&:hover': {
+                bgcolor: 'rgba(158, 187, 166, 0.3)',
+              },
+            },
+          }}
+        >
+          <ListItemIcon>
+            <NoteIcon />
+          </ListItemIcon>
+          <ListItemText 
+            primary="전체 노트"
+            primaryTypographyProps={{
+              style: { 
+                fontWeight: !currentFolderId ? 600 : 400,
+                color: '#2c5530'
+              }
+            }}
+          />
+        </ListItemButton>
 
-      {/* 알림 */}
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={2000}
-        onClose={() => setSnackbarOpen(false)}
-        message={snackbarMessage}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      />
+        {/* Root 폴더의 노트들 */}
+        <Collapse in={!currentFolderId || currentFolderId === null} timeout="auto" unmountOnExit>
+          {renderRootNotes()}
+        </Collapse>
 
-      {renderContextMenu()}
+        {/* 폴더 목록 */}
+        {folders.map(folder => (
+          <React.Fragment key={folder.id}>
+            <ListItemButton
+              onClick={() => {
+                handleFolderToggle(folder.id);
+                handleFolderChange(folder.id);
+              }}
+              selected={currentFolderId === folder.id}
+              sx={{
+                '&.Mui-selected': {
+                  bgcolor: 'rgba(158, 187, 166, 0.2)',
+                  '&:hover': {
+                    bgcolor: 'rgba(158, 187, 166, 0.3)',
+                  },
+                },
+              }}
+            >
+              <ListItemIcon>
+                {openFolders[folder.id] ? <FolderOpenIcon /> : <FolderIcon />}
+              </ListItemIcon>
+              <ListItemText 
+                primary={folder.name}
+                primaryTypographyProps={{
+                  style: { 
+                    fontWeight: currentFolderId === folder.id ? 600 : 400,
+                    color: '#2c5530'
+                  }
+                }}
+              />
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteFolder(folder.id);
+                }}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </ListItemButton>
+
+            {/* 폴더 내 노트 목록 */}
+            <Collapse in={openFolders[folder.id]} timeout="auto" unmountOnExit>
+              <List component="div" disablePadding>
+                {notes
+                  .filter(note => note.folderId === folder.id)
+                  .map(note => (
+                    <ListItemButton
+                      key={note.id}
+                      selected={selectedNote?.id === note.id}
+                      onClick={() => setSelectedNote(note)}
+                      sx={{
+                        pl: 4,
+                        '&.Mui-selected': {
+                          bgcolor: 'rgba(158, 187, 166, 0.2)',
+                          '&:hover': {
+                            bgcolor: 'rgba(158, 187, 166, 0.3)',
+                          },
+                        },
+                      }}
+                    >
+                      <ListItemIcon>
+                        <NoteIcon />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary={note.title}
+                        secondary={formatDate(note.createdAt)}
+                        primaryTypographyProps={{
+                          style: { 
+                            fontWeight: selectedNote?.id === note.id ? 600 : 400,
+                            color: '#2c5530'
+                          }
+                        }}
+                      />
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteNote(note.id);
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </ListItemButton>
+                  ))}
+              </List>
+            </Collapse>
+          </React.Fragment>
+        ))}
+      </List>
+    </Paper>
+  );
+
+  // 노트 삭제 핸들러
+  const handleDeleteNote = async (noteId: string) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      await deleteDoc(doc(db, `users/${user.uid}/notes/${noteId}`));
+      
+      // 선택된 노트가 삭제된 노트인 경우 선택 해제
+      if (selectedNote?.id === noteId) {
+        setSelectedNote(null);
+      }
+      
+      showSnackbar('노트가 삭제되었습니다.');
+    } catch (error) {
+      console.error('Failed to delete note:', error);
+      showSnackbar('노트 삭제에 실패했습니다.');
+    }
+  };
+
+  // 삭제 다이얼로그 렌더링
+  const renderDeleteDialog = () => (
+    <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+      <DialogTitle>삭제 확인</DialogTitle>
+      <DialogContent>
+        <Typography>
+          {noteToDelete ? '이 노트를 삭제하시겠습니까?' : '이 폴더를 삭제하시겠습니까?'}
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setDeleteDialogOpen(false)}>취소</Button>
+        <Button onClick={handleDeleteConfirm} color="error">삭제</Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+  // 스낵바 렌더링
+  const renderSnackbar = () => (
+    <Snackbar
+      open={snackbarOpen}
+      autoHideDuration={2000}
+      onClose={() => setSnackbarOpen(false)}
+      message={snackbarMessage}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+    />
+  );
+
+  return (
+    <Box sx={{ display: 'flex', height: '100vh' }}>
+      {renderSidebar()}
+      <Box sx={{ flex: 1, position: 'relative' }}>
+        {/* 메인 컨텐츠 영역 */}
+        <Box sx={{ 
+          flex: 1,
+          p: 3,
+          height: '100%',
+          overflow: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          {/* 상단 고정 요소들 */}
+          {renderBoardTitle()}
+          {renderOCDToggle()}
+
+          {/* 노트 컨텐츠 영역 */}
+          <Box sx={{ 
+            flex: 1,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            position: 'relative',
+          }}>
+            {notes.length > 0 ? renderNoteContent() : (
+              <Typography 
+                color="text.secondary"
+                sx={{
+                  fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+                  fontSize: '1.2rem',
+                }}
+              >
+                왼쪽에서 메모를 선택해주세요
+              </Typography>
+            )}
+          </Box>
+        </Box>
+
+        {/* 새 메모 작성 버튼 */}
+        <Fab
+          color="primary"
+          sx={{
+            position: 'fixed',
+            bottom: 16,
+            right: 16,
+            bgcolor: '#9cbb9c',
+            '&:hover': {
+              bgcolor: '#7a9e7a',
+            },
+          }}
+          onClick={() => navigate('/notes/new')}
+        >
+          <AddIcon />
+        </Fab>
+
+        {/* 다이얼로그 및 알림 */}
+        {renderNewFolderDialog()}
+        {renderDeleteDialog()}
+        {renderSnackbar()}
+        {renderContextMenu()}
+      </Box>
     </Box>
   );
 }; 
