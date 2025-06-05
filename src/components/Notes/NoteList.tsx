@@ -43,6 +43,7 @@ import {
   Check as CheckIcon,
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
+  ShuffleRounded as ShuffleIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 
@@ -1980,7 +1981,29 @@ export const NoteList = () => {
     }
   }, [isOCDMode]);
 
-  // 렌더링 컴포넌트들...
+  // 노트 섞기 함수 추가
+  const shuffleNotes = () => {
+    const updatedPositions = { ...notePositions };
+    const existingNotes = backgroundNotes;
+    
+    existingNotes.forEach((note, index) => {
+      const position = generateRandomPosition(
+        index,
+        updatedPositions,
+        note,
+        existingNotes
+      );
+      updatedPositions[note.id] = {
+        x: position.x,
+        y: position.y,
+        rotate: isOCDMode ? 0 : (Math.random() - 0.5) * 2 * MAX_ROTATION,
+        zIndex: position.zIndex
+      };
+    });
+
+    setNotePositions(updatedPositions);
+  };
+
   const renderOCDToggle = () => (
     <Box sx={{
       position: 'fixed',
@@ -2002,12 +2025,13 @@ export const NoteList = () => {
         boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
       }
     }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      {/* OCD 토글 */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 0.5 }}>
         <Typography sx={{
           fontWeight: 600,
           fontSize: '1rem',
           color: isOCDMode ? '#2c5530' : '#666',
-          minWidth: '45px',
+          minWidth: '20px',
           lineHeight: '40px',
         }}>
           OCD
@@ -2027,17 +2051,53 @@ export const NoteList = () => {
             '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
               backgroundColor: '#9cbb9c',
             },
-            zIndex: 2001,
-            pointerEvents: 'auto',
+            ml: -0.5,
           }}
         />
       </Box>
+
       <Box sx={{ 
         height: '24px', 
         width: '1px', 
         bgcolor: 'rgba(0,0,0,0.1)',
-        mx: 1 
+        mx: 0.5 
       }} />
+
+      {/* 노트섞기 버튼 */}
+      <Button
+        size="small"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          shuffleNotes();
+        }}
+        startIcon={<ShuffleIcon />}
+        sx={{
+          bgcolor: 'white',
+          color: '#666',
+          '&:hover': {
+            bgcolor: 'rgba(0,0,0,0.05)',
+          },
+          transition: 'all 0.3s',
+          minWidth: '50px',
+          height: '28px',
+          ml: -0.5,
+          mr: -0.5,
+          px: 1,
+          textAlign: 'right',
+        }}
+      >
+        노트섞기
+      </Button>
+
+      <Box sx={{ 
+        height: '24px', 
+        width: '1px', 
+        bgcolor: 'rgba(0,0,0,0.1)',
+        mx: 0.5 
+      }} />
+
+      {/* 레이아웃 저장 버튼 */}
       <Button
         size="small"
         onClick={(e) => {
@@ -2054,11 +2114,9 @@ export const NoteList = () => {
             bgcolor: showSaveSuccess ? '#7a9e7a' : 'rgba(0,0,0,0.05)',
           },
           transition: 'all 0.3s',
-          minWidth: '100px',
-          height: '40px',
-          lineHeight: '40px',
-          zIndex: 2001,
-          pointerEvents: 'auto',
+          minWidth: '50px',
+          height: '28px',
+          px: 1,
         }}
       >
         {isLayoutSaving ? (
