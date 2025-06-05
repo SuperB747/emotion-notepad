@@ -1,41 +1,23 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, connectAuthEmulator, inMemoryPersistence, setPersistence } from 'firebase/auth';
-import { 
-  getFirestore, 
-  connectFirestoreEmulator, 
-  CACHE_SIZE_UNLIMITED,
-  persistentLocalCache,
-  persistentMultipleTabManager 
-} from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getAuth, connectAuthEmulator } from 'firebase/auth';
 
-// Emulator 설정을 위한 최소한의 Firebase 설정
+// 에뮬레이터 모드를 위한 최소 설정
 const firebaseConfig = {
-  projectId: "emotion-notepad-demo",
-  apiKey: "demo-key",
+  apiKey: "dummy-api-key",
+  projectId: "emotion-notepad-b9bcb",
+  authDomain: "emotion-notepad-b9bcb.firebaseapp.com"
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-
-// Initialize Firestore with optimized settings for emulator
-const firestoreSettings = {
-  experimentalAutoDetectLongPolling: true,
-  useFetchStreams: false,
-  cache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager(),
-    cacheSizeBytes: CACHE_SIZE_UNLIMITED
-  })
-};
-
-// Initialize Firestore and Auth
-const db = getFirestore(app);
 const auth = getAuth(app);
+const db = getFirestore(app);
 
-// Emulator 연결 설정
-  console.log('Connecting to emulators...');
-  connectFirestoreEmulator(db, 'localhost', 9090);
-  connectAuthEmulator(auth, 'http://localhost:9095', { disableWarnings: true });
-  setPersistence(auth, inMemoryPersistence);
-  console.log('Connected to emulators');
+// 항상 에뮬레이터에 연결
+console.log('Connecting to emulators...');
+connectFirestoreEmulator(db, '127.0.0.1', 8080);
+connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+console.log('Connected to emulators');
 
-export { auth, db }; 
+export { db, auth }; 
