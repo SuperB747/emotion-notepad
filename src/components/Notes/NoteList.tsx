@@ -80,7 +80,8 @@ interface FolderLayout {
   id: string;
   positions: Record<string, NotePosition>;
   isOCDMode: boolean;
-  originalRotations?: Record<string, number>;
+  folderName: string | null;  // 폴더 이름 추가
+  updatedAt?: any;
 }
 
 interface NoteCardProps {
@@ -587,7 +588,7 @@ export const NoteList = () => {
   const isWithinScreen = (x: number, y: number, rotation: number): boolean => {
     const bgNoteHalfWidth = (BACKGROUND_NOTE_WIDTH * BASE_SCALE) / 2;
     const bgNoteHalfHeight = (BACKGROUND_NOTE_HEIGHT * BASE_SCALE) / 2;
-
+    
     // 회전을 고려한 경계 상자 계산
     const angleRad = (rotation * Math.PI) / 180;
     const cosAngle = Math.cos(angleRad);
@@ -603,7 +604,7 @@ export const NoteList = () => {
       x: x + (point.x * cosAngle - point.y * sinAngle),
       y: y + (point.x * sinAngle + point.y * cosAngle)
     }));
-
+    
     // 회전된 사각형의 경계 상자 계산
     const minX = Math.min(...corners.map(p => p.x));
     const maxX = Math.max(...corners.map(p => p.x));
@@ -1188,18 +1189,15 @@ export const NoteList = () => {
 
   // 폴더 변경 핸들러
   const handleFolderChange = async (folderId: string | null) => {
+    console.log('Changing folder to:', folderId);
+    console.log('Current folders:', folders);
+    console.log('Is root folder:', !folderId);
+    
     setCurrentFolderId(folderId);
     
-    // 현재 폴더의 레이아웃 로드
-    const layoutData = folderLayouts.find(layout => layout.id === (folderId || 'default'));
-    
-    if (layoutData) {
-      // 기존 위치 정보 유지하면서 레이아웃 적용
-      setNotePositions(prev => ({
-        ...prev,
-        ...layoutData.positions
-      }));
-      setIsOCDMode(layoutData.isOCDMode);
+    // root 폴더이거나 폴더 정보가 로드된 경우에만 레이아웃 로드
+    if (!folderId || folders.length > 0) {
+      await loadFolderLayout(folderId);
     }
 
     // 현재 폴더의 노트만 배경으로 표시
@@ -1218,14 +1216,28 @@ export const NoteList = () => {
     const foldersRef = collection(db, `users/${user.uid}/folders`);
     const foldersQuery = query(foldersRef, orderBy('createdAt', 'desc'));
 
+    // 폴더 데이터 로드 상태 추적
     const unsubscribe = onSnapshot(foldersQuery, (snapshot) => {
       const foldersList = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
       } as Folder));
       
+      console.log('Folders loaded:', foldersList);
       setFolders(foldersList);
+
+      // 폴더 로드 후 현재 폴더의 레이아웃도 다시 로드
+      if (currentFolderId) {
+        loadFolderLayout(currentFolderId);
+      }
+    }, (error) => {
+      console.error('Error loading folders:', error);
     });
+
+    // 컴포넌트 마운트 시 root 폴더의 레이아웃 로드
+    if (!currentFolderId) {
+      loadFolderLayout(null);
+    }
 
     return () => unsubscribe();
   }, []);
@@ -1472,51 +1484,51 @@ export const NoteList = () => {
   // 노트 컨텐츠 영역 렌더링 수정
   const renderNoteContent = () => {
     return (
-      <Box sx={{ 
-        position: 'relative',
-        width: '100%',
-        maxWidth: '1200px',
-        height: '800px',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        transform: 'translateY(-8%)',
-        margin: '0 auto',
-        pt: 0,
-      }}>
-        {renderBackgroundNotes(filteredBackgroundNotes)}
-        {selectedNote && (
-          <Paper
-            elevation={8}
-            sx={{
-              position: 'absolute',
-              width: '500px',
-              minHeight: '400px',
-              p: 3,
-              bgcolor: getBackgroundColor(selectedNote, isEditing, editedColor),
-              borderRadius: '16px',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-              zIndex: MAIN_NOTE_Z_INDEX,
-              opacity: 1,
-              left: '50%',
-              top: '50%',
-              transform: 'translate(-50%, -42%)',
-              filter: 'blur(0px)',
-              '&::before': {
-                content: '""',
+        <Box sx={{ 
+          position: 'relative',
+          width: '100%',
+          maxWidth: '1200px',
+          height: '800px',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          transform: 'translateY(-8%)',
+          margin: '0 auto',
+          pt: 0,
+        }}>
+          {renderBackgroundNotes(filteredBackgroundNotes)}
+          {selectedNote && (
+            <Paper
+              elevation={8}
+              sx={{
                 position: 'absolute',
-                top: 0,
+                width: '500px',
+                minHeight: '400px',
+                p: 3,
+                bgcolor: getBackgroundColor(selectedNote, isEditing, editedColor),
+                borderRadius: '16px',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                zIndex: MAIN_NOTE_Z_INDEX,
+                opacity: 1,
                 left: '50%',
-                transform: 'translateX(-50%)',
-                width: '80px',
-                height: '25px',
-                bgcolor: '#9cbb9c',
-                borderRadius: '0 0 12px 12px',
-                boxShadow: 'inset 0 -5px 8px rgba(0,0,0,0.1)',
-              },
-            }}
-          >
+                top: '50%',
+                transform: 'translate(-50%, -42%)',
+                filter: 'blur(0px)',
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  top: 0,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: '80px',
+                  height: '25px',
+                  bgcolor: '#9cbb9c',
+                  borderRadius: '0 0 12px 12px',
+                  boxShadow: 'inset 0 -5px 8px rgba(0,0,0,0.1)',
+                },
+              }}
+            >
             {/* z-index 디버그 표시 */}
             <Typography
               sx={{
@@ -1535,8 +1547,8 @@ export const NoteList = () => {
               {MAIN_NOTE_Z_INDEX}
             </Typography>
 
-            {isEditing ? (
-              <>
+              {isEditing ? (
+                <>
                 <Box sx={{ position: 'relative', zIndex: 1 }}>
                   <TextField
                     fullWidth
@@ -1629,75 +1641,75 @@ export const NoteList = () => {
                       저장
                     </Button>
                   </Box>
-                </Box>
-              </>
-            ) : (
-              <>
-                <Box sx={{
-                  position: 'relative',
-                  mb: 2,
+                  </Box>
+                </>
+              ) : (
+                <>
+                  <Box sx={{
+                    position: 'relative',
+                    mb: 2,
                   textAlign: 'center',
                   zIndex: 1,
-                }}>
-                  <Typography
-                    variant="h4"
-                    sx={{
-                      color: '#2c5530',
-                      fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
-                      fontWeight: 'bold',
-                      textShadow: '1px 1px 0 rgba(255,255,255,0.5)',
-                      fontSize: '1.6rem',
-                    }}
-                  >
-                    {selectedNote.title}
-                  </Typography>
-                </Box>
+                  }}>
+                    <Typography 
+                      variant="h4" 
+                      sx={{ 
+                        color: '#2c5530',
+                        fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+                        fontWeight: 'bold',
+                        textShadow: '1px 1px 0 rgba(255,255,255,0.5)',
+                        fontSize: '1.6rem',
+                      }}
+                    >
+                      {selectedNote.title}
+                    </Typography>
+                  </Box>
 
-                <Box sx={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
+                  <Box sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
                   mb: 3,
                   zIndex: 1,
                   position: 'relative',
-                }}>
-                  <Typography 
-                    variant="caption"
-                    sx={{
-                      color: '#666',
-                      fontStyle: 'italic',
-                    }}
-                  >
-                    {selectedNote.createdAt ? formatDate(selectedNote.createdAt) : ''}
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <IconButton onClick={handleEditClick} size="small" sx={{ color: '#9cbb9c', p: 0.5 }}>
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton onClick={() => handleDeleteClick(selectedNote.id)} size="small" color="error" sx={{ p: 0.5, color: '#9cbb9c' }}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                  }}>
+                    <Typography 
+                      variant="caption"
+                      sx={{
+                        color: '#666',
+                        fontStyle: 'italic',
+                      }}
+                    >
+                      {selectedNote.createdAt ? formatDate(selectedNote.createdAt) : ''}
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <IconButton onClick={handleEditClick} size="small" sx={{ color: '#9cbb9c', p: 0.5 }}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton onClick={() => handleDeleteClick(selectedNote.id)} size="small" color="error" sx={{ p: 0.5, color: '#9cbb9c' }}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
                   </Box>
-                </Box>
 
-                <Typography
-                  sx={{
-                    whiteSpace: 'pre-wrap',
-                    lineHeight: 1.8,
-                    color: '#444',
-                    fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
-                    fontSize: '1.1rem',
+                  <Typography
+                    sx={{
+                      whiteSpace: 'pre-wrap',
+                      lineHeight: 1.8,
+                      color: '#444',
+                      fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+                      fontSize: '1.1rem',
                     position: 'relative',
                     zIndex: 1,
-                  }}
-                >
-                  {selectedNote.content}
-                </Typography>
-              </>
-            )}
-          </Paper>
-        )}
-      </Box>
+                    }}
+                  >
+                    {selectedNote.content}
+                  </Typography>
+                </>
+              )}
+            </Paper>
+          )}
+        </Box>
     );
   };
 
@@ -1768,7 +1780,7 @@ export const NoteList = () => {
               const currentPosition = notePositions[note.id];
               if (currentPosition) {
                 originalZIndexRef.current[note.id] = currentPosition.zIndex || 1;
-              }
+            }
 
               // 드래그 시작 시 z-index를 100으로 설정
               setNotePositions(prev => ({
@@ -1803,7 +1815,7 @@ export const NoteList = () => {
           }}
           onMouseLeave={(e: React.MouseEvent<HTMLDivElement>) => {
             if (isTransitioning) return;
-            
+
             // 드래그가 끝난 직후에는 z-index를 복원하지 않음
             if (originalZIndexRef.current[note.id] !== undefined && !isDragging.current) {
               const originalZIndex = originalZIndexRef.current[note.id];
@@ -2068,47 +2080,52 @@ export const NoteList = () => {
 
   // 레이아웃 저장 함수 수정
   const saveFolderLayout = async () => {
-    const user = auth.currentUser;
-    if (!user) return;
-
-    setIsLayoutSaving(true);
-
     try {
-      const batch = writeBatch(db);
+      setIsLayoutSaving(true);
+      const user = auth.currentUser;
+      if (!user) return;
+
+      // root 폴더가 아닌데 폴더 정보가 로드되지 않았다면 대기
+      if (currentFolderId && folders.length === 0) {
+        console.log('Waiting for folders to load...');
+        setIsLayoutSaving(false);
+        return;
+      }
+
+      const layoutId = currentFolderId || 'root';
+      const layoutRef = doc(db, `users/${user.uid}/layouts/${layoutId}`);
       
-      // 모든 노트(메인 노트 + 배경 노트)의 현재 위치 정보를 저장
-      const allNotes = [...backgroundNotes];
-      if (selectedNote) allNotes.push(selectedNote);
+      // 현재 폴더 이름 가져오기 (root 폴더는 항상 '전체 보기')
+      const folderName = currentFolderId 
+        ? folders.find(f => f.id === currentFolderId)?.name || null
+        : '전체 보기';
 
-      allNotes.forEach(note => {
-        const position = notePositions[note.id];
-        if (position) {
-          const noteRef = doc(db, `users/${user.uid}/notes/${note.id}`);
-          batch.update(noteRef, {
-            position: {
-              x: position.x,
-              y: position.y,
-              rotate: position.rotate,
-              zIndex: position.zIndex
-            }
-          });
-        }
-      });
+      console.log('Saving layout with folder name:', folderName);
+      console.log('Current folder ID:', currentFolderId);
+      console.log('Available folders:', folders);
+      console.log('Is root folder:', !currentFolderId);
 
-      // 폴더 레이아웃 정보 저장
-      const layoutRef = doc(db, `users/${user.uid}/layouts/${currentFolderId || 'default'}`);
-      await setDoc(layoutRef, {
+      const layoutData = {
+        id: layoutId,
         positions: notePositions,
-        isOCDMode,
+        isOCDMode: isOCDMode,
+        folderName: folderName,
         updatedAt: serverTimestamp()
-      });
+      };
 
-      await batch.commit();
-      
+      console.log('Saving layout data:', layoutData);
+
+      // 현재 레이아웃 정보와 함께 OCD 모드 상태와 폴더 이름도 저장
+      await setDoc(layoutRef, layoutData);
+
+      // 저장 후 데이터 확인
+      const savedDoc = await getDoc(layoutRef);
+      console.log('Saved layout data:', savedDoc.data());
+
       setShowSaveSuccess(true);
       setTimeout(() => setShowSaveSuccess(false), 2000);
     } catch (error) {
-      console.error('Failed to save layout:', error);
+      console.error('Error saving layout:', error);
     } finally {
       setIsLayoutSaving(false);
     }
@@ -2120,26 +2137,58 @@ export const NoteList = () => {
       const user = auth.currentUser;
       if (!user) return;
 
-      const layoutId = folderId || 'default';
-      const layoutRef = doc(db, `users/${user.uid}/folderLayouts/${layoutId}`);
+      const layoutId = folderId || 'root';
+      const layoutRef = doc(db, `users/${user.uid}/layouts/${layoutId}`);
+    
+      console.log('Loading layout for folder:', folderId);
+      console.log('Layout ID:', layoutId);
+      console.log('Is root folder:', !folderId);
+
       const layoutDoc = await getDoc(layoutRef);
+      console.log('Layout document exists:', layoutDoc.exists());
 
       if (layoutDoc.exists()) {
         const layoutData = layoutDoc.data() as FolderLayout;
+        console.log('Loaded layout data:', layoutData);
+
         setNotePositions(layoutData.positions);
         setIsOCDMode(layoutData.isOCDMode);
         setIsInitialLayout(false);
 
-        // Update folderLayouts state
+        // Update folderLayouts state with folder name
         setFolderLayouts(prev => {
           const filtered = prev.filter(layout => layout.id !== layoutId);
-          return [...filtered, layoutData];
+          const newLayouts = [...filtered, layoutData];
+          console.log('Updated folder layouts:', newLayouts);
+          return newLayouts;
         });
+
+        // 폴더 이름이 변경되었다면 업데이트 (root 폴더는 제외)
+        if (folderId && layoutData.folderName && folderId !== 'root') {
+          const folder = folders.find(f => f.id === folderId);
+          console.log('Found folder:', folder);
+          console.log('Layout folder name:', layoutData.folderName);
+
+          if (folder && folder.name !== layoutData.folderName) {
+            console.log('Updating folder name from', folder.name, 'to', layoutData.folderName);
+            const folderRef = doc(db, `users/${user.uid}/folders/${folderId}`);
+            await updateDoc(folderRef, {
+              name: layoutData.folderName
+            });
+          }
+        }
+      } else {
+        // 레이아웃이 없는 경우 기본값 설정
+        if (!folderId) {  // root 폴더인 경우
+          setNotePositions({});
+          setIsOCDMode(false);
+          setIsInitialLayout(true);
+        }
       }
     } catch (error) {
       console.error('Failed to load layout:', error);
     }
-  }, []);
+  }, [folders]);
 
   // OCD 모드 변경 시 노트 회전 업데이트
   useEffect(() => {
@@ -2350,7 +2399,7 @@ export const NoteList = () => {
   // Root 폴더의 노트 목록 렌더링
   const renderRootNotes = () => {
     const rootNotes = notes.filter(note => !note.folderId);
-    return (
+  return (
       <List component="div" disablePadding>
         {rootNotes.map(note => (
           <ListItemButton
@@ -2397,43 +2446,43 @@ export const NoteList = () => {
 
   // 왼쪽 사이드바 렌더링
   const renderSidebar = () => (
-    <Paper 
-      elevation={3} 
-      sx={{ 
+      <Paper 
+        elevation={3} 
+        sx={{ 
         width: 280,
         height: '100vh',
         bgcolor: 'background.paper',
         borderRight: '1px solid rgba(0, 0, 0, 0.12)',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      {/* 사용자 정보 */}
-      <Box sx={{ 
-        p: 2, 
-        borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        bgcolor: 'rgba(158, 187, 166, 0.4)',
-      }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Avatar sx={{ bgcolor: '#9cbb9c' }}>
-            {auth.currentUser?.email?.[0].toUpperCase() || 'U'}
-          </Avatar>
-          <Box>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-              {auth.currentUser?.email?.split('@')[0]}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              메모 {notes.length}개
-            </Typography>
+          display: 'flex', 
+          flexDirection: 'column',
+        }}
+      >
+        {/* 사용자 정보 */}
+        <Box sx={{ 
+          p: 2, 
+          borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          bgcolor: 'rgba(158, 187, 166, 0.4)',
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Avatar sx={{ bgcolor: '#9cbb9c' }}>
+              {auth.currentUser?.email?.[0].toUpperCase() || 'U'}
+            </Avatar>
+            <Box>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                {auth.currentUser?.email?.split('@')[0]}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                메모 {notes.length}개
+              </Typography>
+            </Box>
           </Box>
+          <IconButton onClick={handleLogout} size="small">
+            <ExitToAppIcon />
+          </IconButton>
         </Box>
-        <IconButton onClick={handleLogout} size="small">
-          <ExitToAppIcon />
-        </IconButton>
-      </Box>
 
       {/* 폴더 및 노트 목록 */}
       <List sx={{ flex: 1, overflow: 'auto' }}>
@@ -2567,7 +2616,7 @@ export const NoteList = () => {
           </React.Fragment>
         ))}
       </List>
-    </Paper>
+      </Paper>
   );
 
   // 노트 삭제 핸들러
@@ -2715,62 +2764,62 @@ export const NoteList = () => {
       {renderSidebar()}
       <Box sx={{ flex: 1, position: 'relative' }}>
         {/* 메인 컨텐츠 영역 */}
+      <Box sx={{ 
+        flex: 1, 
+        p: 3, 
+          height: '100%',
+        overflow: 'auto',
+        display: 'flex',
+          flexDirection: 'column',
+      }}>
+        {/* 상단 고정 요소들 */}
+        {renderBoardTitle()}
+        {renderOCDToggle()}
+
+        {/* 노트 컨텐츠 영역 */}
         <Box sx={{ 
           flex: 1,
-          p: 3,
-          height: '100%',
-          overflow: 'auto',
           display: 'flex',
-          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          position: 'relative',
         }}>
-          {/* 상단 고정 요소들 */}
-          {renderBoardTitle()}
-          {renderOCDToggle()}
-
-          {/* 노트 컨텐츠 영역 */}
-          <Box sx={{ 
-            flex: 1,
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            position: 'relative',
-          }}>
-            {notes.length > 0 ? renderNoteContent() : (
-              <Typography 
-                color="text.secondary"
-                sx={{
-                  fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
-                  fontSize: '1.2rem',
-                }}
-              >
-                왼쪽에서 메모를 선택해주세요
-              </Typography>
-            )}
-          </Box>
+          {notes.length > 0 ? renderNoteContent() : (
+            <Typography 
+              color="text.secondary"
+              sx={{
+                fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+                fontSize: '1.2rem',
+              }}
+            >
+              왼쪽에서 메모를 선택해주세요
+            </Typography>
+          )}
         </Box>
+      </Box>
 
-        {/* 새 메모 작성 버튼 */}
-        <Fab
-          color="primary"
-          sx={{
-            position: 'fixed',
-            bottom: 16,
-            right: 16,
-            bgcolor: '#9cbb9c',
-            '&:hover': {
-              bgcolor: '#7a9e7a',
-            },
-          }}
-          onClick={() => navigate('/notes/new')}
-        >
-          <AddIcon />
-        </Fab>
+      {/* 새 메모 작성 버튼 */}
+      <Fab
+        color="primary"
+        sx={{
+          position: 'fixed',
+          bottom: 16,
+          right: 16,
+          bgcolor: '#9cbb9c',
+          '&:hover': {
+            bgcolor: '#7a9e7a',
+          },
+        }}
+        onClick={() => navigate('/notes/new')}
+      >
+        <AddIcon />
+      </Fab>
 
         {/* 다이얼로그 및 알림 */}
         {renderNewFolderDialog()}
         {renderDeleteDialog()}
         {renderSnackbar()}
-        {renderContextMenu()}
+      {renderContextMenu()}
       </Box>
     </Box>
   );
