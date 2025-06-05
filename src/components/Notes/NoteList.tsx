@@ -1423,98 +1423,118 @@ export const NoteList = () => {
               },
             }}
           >
+            {/* z-index 디버그 표시 */}
+            <Typography
+              sx={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                fontSize: '64px',
+                fontWeight: 'bold',
+                color: 'rgba(0, 0, 0, 0.15)',
+                pointerEvents: 'none',
+                userSelect: 'none',
+                zIndex: 0,
+              }}
+            >
+              {MAIN_NOTE_Z_INDEX}
+            </Typography>
+
             {isEditing ? (
               <>
-                <TextField
-                  fullWidth
-                  value={editedTitle}
-                  onChange={(e) => setEditedTitle(e.target.value)}
-                  variant="standard"
-                  sx={{
-                    mb: 2,
-                    '& input': {
-                      fontSize: '2rem',
-                      fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
-                      color: '#2c5530',
-                      textAlign: 'center',
-                    },
-                  }}
-                />
-                
-                {/* 색상 선택 버튼 그룹 */}
-                <Box sx={{ 
-                  display: 'flex', 
-                  justifyContent: 'center', 
-                  gap: 1, 
-                  mb: 3,
-                  '& button': {
-                    width: 36,
-                    height: 36,
-                    minWidth: 'unset',
-                    p: 0,
-                    borderRadius: '50%',
-                    border: '2px solid transparent',
-                    '&.selected': {
-                      border: '2px solid #666',
-                    }
-                  }
-                }}>
-                  {Object.entries(NOTE_COLORS).map(([colorKey, colorData]) => (
-                    <Button
-                      key={colorKey}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditedColor(colorKey as NoteColor);
-                      }}
-                      className={editedColor === colorKey ? 'selected' : ''}
-                      sx={{
-                        bgcolor: colorData.bg,
-                        '&:hover': {
-                          bgcolor: colorData.hover,
-                        }
-                      }}
-                      title={colorData.name}
-                    />
-                  ))}
-                </Box>
-
-                <TextField
-                  fullWidth
-                  multiline
-                  rows={12}
-                  value={editedContent}
-                  onChange={(e) => setEditedContent(e.target.value)}
-                  variant="standard"
-                  sx={{
-                    '& textarea': {
-                      fontSize: '1.1rem',
-                      fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
-                      color: '#444',
-                      lineHeight: 1.8,
-                    },
-                  }}
-                />
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 2 }}>
-                  <Button
-                    startIcon={<CancelIcon />}
-                    onClick={handleCancel}
-                    sx={{ color: '#666' }}
-                  >
-                    취소
-                  </Button>
-                  <Button
-                    startIcon={<SaveIcon />}
-                    onClick={handleSave}
+                <Box sx={{ position: 'relative', zIndex: 1 }}>
+                  <TextField
+                    fullWidth
+                    value={editedTitle}
+                    onChange={(e) => setEditedTitle(e.target.value)}
+                    variant="standard"
                     sx={{
-                      bgcolor: '#9cbb9c',
-                      color: 'white',
-                      '&:hover': {
-                        bgcolor: '#7a9e7a',
+                      mb: 2,
+                      '& input': {
+                        fontSize: '2rem',
+                        fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+                        color: '#2c5530',
+                        textAlign: 'center',
                       },
                     }}
-                  >
-                    저장
-                  </Button>
+                  />
+                  
+                  {/* 색상 선택 버튼 그룹 */}
+                  <Box sx={{ 
+                    display: 'flex', 
+                    justifyContent: 'center', 
+                    gap: 1, 
+                    mb: 3,
+                    '& button': {
+                      width: 36,
+                      height: 36,
+                      minWidth: 'unset',
+                      p: 0,
+                      borderRadius: '50%',
+                      border: '2px solid transparent',
+                      '&.selected': {
+                        border: '2px solid #666',
+                      }
+                    }
+                  }}>
+                    {Object.entries(NOTE_COLORS).map(([colorKey, colorData]) => (
+                      <Button
+                        key={colorKey}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditedColor(colorKey as NoteColor);
+                        }}
+                        className={editedColor === colorKey ? 'selected' : ''}
+                        sx={{
+                          bgcolor: colorData.bg,
+                          '&:hover': {
+                            bgcolor: colorData.hover,
+                          }
+                        }}
+                        title={colorData.name}
+                      />
+                    ))}
+                  </Box>
+
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={12}
+                    value={editedContent}
+                    onChange={(e) => setEditedContent(e.target.value)}
+                    variant="standard"
+                    sx={{
+                      '& textarea': {
+                        fontSize: '1.1rem',
+                        fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
+                        color: '#444',
+                        lineHeight: 1.8,
+                      },
+                    }}
+                  />
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 2 }}>
+                    <Button
+                      startIcon={<CancelIcon />}
+                      onClick={handleCancel}
+                      sx={{ color: '#666' }}
+                    >
+                      취소
+                    </Button>
+                    <Button
+                      startIcon={<SaveIcon />}
+                      onClick={handleSave}
+                      sx={{
+                        bgcolor: '#9cbb9c',
+                        color: 'white',
+                        '&:hover': {
+                          bgcolor: '#7a9e7a',
+                        },
+                      }}
+                    >
+                      저장
+                    </Button>
+                  </Box>
                 </Box>
               </>
             ) : (
@@ -1522,11 +1542,12 @@ export const NoteList = () => {
                 <Box sx={{
                   position: 'relative',
                   mb: 2,
-                  textAlign: 'center'
+                  textAlign: 'center',
+                  zIndex: 1,
                 }}>
-                  <Typography 
-                    variant="h4" 
-                    sx={{ 
+                  <Typography
+                    variant="h4"
+                    sx={{
                       color: '#2c5530',
                       fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
                       fontWeight: 'bold',
@@ -1542,7 +1563,9 @@ export const NoteList = () => {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  mb: 3
+                  mb: 3,
+                  zIndex: 1,
+                  position: 'relative',
                 }}>
                   <Typography 
                     variant="caption"
@@ -1570,6 +1593,8 @@ export const NoteList = () => {
                     color: '#444',
                     fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif",
                     fontSize: '1.1rem',
+                    position: 'relative',
+                    zIndex: 1,
                   }}
                 >
                   {selectedNote.content}
@@ -1724,7 +1749,26 @@ export const NoteList = () => {
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
+            position: 'relative',
           }}>
+            {/* z-index 디버그 표시 */}
+            <Typography
+              sx={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                fontSize: '64px',
+                fontWeight: 'bold',
+                color: 'rgba(0, 0, 0, 0.15)',
+                pointerEvents: 'none',
+                userSelect: 'none',
+                zIndex: 0,
+              }}
+            >
+              {position.zIndex || 1}
+            </Typography>
+
             <Typography 
               variant="h6" 
               sx={{ 
@@ -1733,6 +1777,8 @@ export const NoteList = () => {
                 fontSize: '1.2rem',
                 fontWeight: 'bold',
                 color: '#2c5530',
+                position: 'relative',
+                zIndex: 1,
               }}
             >
               {note.title}
@@ -1748,6 +1794,8 @@ export const NoteList = () => {
                 fontSize: '0.95rem',
                 lineHeight: 1.5,
                 color: '#444',
+                position: 'relative',
+                zIndex: 1,
               }}
             >
               {note.content}
@@ -2076,7 +2124,7 @@ export const NoteList = () => {
           shuffleNotes();
         }}
         startIcon={<ShuffleIcon />}
-노        sx={{
+        sx={{
           bgcolor: 'white',
           color: '#666',
           '&:hover': {
