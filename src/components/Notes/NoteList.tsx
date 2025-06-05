@@ -966,25 +966,13 @@ export const NoteList = () => {
     const user = auth.currentUser;
     if (!user) return;
 
+    // Firebase에서 노트 데이터를 가져올 때 위치 정보도 함께 로드
     const notesRef = collection(db, `users/${user.uid}/notes`);
     const notesQuery = query(notesRef, orderBy('createdAt', 'desc'));
 
     const unsubscribe = onSnapshot(notesQuery, async (snapshot) => {
       const notesList = snapshot.docs.map(doc => {
         const data = doc.data();
-        // Firebase에 저장된 위치 정보가 있으면 사용
-        if (data.position) {
-          const savedPosition = data.position;
-          setNotePositions(prev => ({
-            ...prev,
-            [doc.id]: {
-              x: savedPosition.x,
-              y: savedPosition.y,
-              rotate: savedPosition.rotate,
-              zIndex: savedPosition.zIndex || 1
-            }
-          }));
-        }
         return {
           id: doc.id,
           ...data,
@@ -992,51 +980,17 @@ export const NoteList = () => {
       });
       
       setNotes(notesList);
-      
-      // 선택된 노트가 없거나 노트 목록이 비어있을 때만 초기화
-      if ((!selectedNote || !notes.length) && notesList.length > 0) {
-        const firstNote = notesList[0];
-        setSelectedNote(firstNote);
-        setEditedTitle(firstNote.title || '');
-        setEditedContent(firstNote.content || '');
-        setEditedColor(firstNote.color || 'yellow');
-        
-        // 현재 폴더의 노트만 필터링
-        const backgroundNotesList = notesList.filter(n => 
-          n.id !== firstNote.id && 
-          (n.folderId === currentFolderId || (!currentFolderId && !n.folderId))
-        );
-        setBackgroundNotes(backgroundNotesList);
 
-        // 위치 정보가 없는 노트들에 대해서만 새로운 위치 생성
-        const initialPositions: Record<string, NotePosition> = { ...notePositions };
-        backgroundNotesList.forEach((note, index) => {
-          if (!initialPositions[note.id] && !note.position) {
-            const position = generateRandomPosition(
-              index,
-              initialPositions,
-              note,
-              backgroundNotesList
-            );
-            initialPositions[note.id] = {
-              x: position.x,
-              y: position.y,
-              rotate: isOCDMode ? 0 : (Math.random() - 0.5) * 2 * MAX_ROTATION,
-              zIndex: position.zIndex
-            };
-          }
-        });
-        
-        // 새로 생성된 위치만 업데이트
-        setNotePositions(prev => ({
-          ...prev,
-          ...initialPositions
-        }));
+      // 노트 데이터가 로드된 후 레이아웃도 로드
+      try {
+        await loadFolderLayout(currentFolderId);
+      } catch (error) {
+        console.error('Error loading layout after notes:', error);
       }
     });
 
     return () => unsubscribe();
-  }, [currentFolderId]);
+  }, [currentFolderId]); // currentFolderId를 의존성 배열에 추가
 
   // 선택된 노트의 내용 업데이트를 위한 별도의 useEffect
   useEffect(() => {
@@ -1216,8 +1170,7 @@ export const NoteList = () => {
     const foldersRef = collection(db, `users/${user.uid}/folders`);
     const foldersQuery = query(foldersRef, orderBy('createdAt', 'desc'));
 
-    // 폴더 데이터 로드 상태 추적
-    const unsubscribe = onSnapshot(foldersQuery, (snapshot) => {
+    const unsubscribe = onSnapshot(foldersQuery, async (snapshot) => {
       const foldersList = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
@@ -1227,20 +1180,15 @@ export const NoteList = () => {
       setFolders(foldersList);
 
       // 폴더 로드 후 현재 폴더의 레이아웃도 다시 로드
-      if (currentFolderId) {
-        loadFolderLayout(currentFolderId);
+      try {
+        await loadFolderLayout(currentFolderId);
+      } catch (error) {
+        console.error('Error loading layout after folders:', error);
       }
-    }, (error) => {
-      console.error('Error loading folders:', error);
     });
 
-    // 컴포넌트 마운트 시 root 폴더의 레이아웃 로드
-    if (!currentFolderId) {
-      loadFolderLayout(null);
-    }
-
     return () => unsubscribe();
-  }, []);
+  }, [currentFolderId]); // currentFolderId를 의존성 배열에 추가
 
   // 노트 목록 렌더링
   const renderNoteList = () => (
