@@ -1799,12 +1799,12 @@ export const NoteList = () => {
             rotate(${position.rotate}deg)`,
             opacity: isTransitioning ? 0 : 0.85,
             transition: draggedNoteId === note.id ? 'none' :
-              isInitialLayout ? 'none' : 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              isInitialLayout ? 'none' : 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
             filter: 'none',
             transformOrigin: 'center center',
             borderRadius: '16px',
             zIndex: position.zIndex || 1,
-            cursor: isDragging.current && draggedNoteId === note.id ? 'grabbing' : 'grab',
+            cursor: isDragging.current && draggedNoteId === note.id ? 'grabbing' : 'pointer',
             willChange: draggedNoteId === note.id ? 'transform' : 'auto',
             visibility: isTransitioning ? 'hidden' : 'visible',
             userSelect: 'none',
@@ -1825,6 +1825,7 @@ export const NoteList = () => {
                 scale(${HOVER_SCALE})
                 rotate(${position.rotate}deg)`,
               boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+              cursor: isDragging.current && draggedNoteId === note.id ? 'grabbing' : 'pointer',
             },
           }}
         >
