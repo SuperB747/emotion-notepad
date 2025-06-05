@@ -2,10 +2,14 @@
   "emulators": {
     "singleProjectMode": true,
     "firestore": {
-      "port": 9090
+      "port": 9090,
+      "host": "127.0.0.1",
+      "data": "./firebase-data/firestore"
     },
     "auth": {
-      "port": 9095
+      "port": 9095,
+      "host": "127.0.0.1",
+      "data": "./firebase-data/auth"
     },
     "ui": {
       "enabled": true,
