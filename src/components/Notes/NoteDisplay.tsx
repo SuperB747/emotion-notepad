@@ -143,17 +143,13 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
                             layout
                             drag={!isSelected}
                             dragMomentum={false}
-                            onDragStart={() => {
-                                onDragStart();
-                                wasDraggedRef.current = true;
-                            }}
+                            onDragStart={onDragStart}
                             onDragEnd={(e, info) => {
-                                onNoteDrag(note.id, { x: info.offset.x, y: info.offset.y });
                                 onDragEnd();
-                                setTimeout(() => { wasDraggedRef.current = false; }, 0);
-                            }}
-                            onTap={() => {
-                                if (!wasDraggedRef.current) {
+                                const wasDragged = Math.abs(info.offset.x) > 2 || Math.abs(info.offset.y) > 2;
+                                if (wasDragged) {
+                                    onNoteDrag(note.id, { x: info.offset.x, y: info.offset.y });
+                                } else {
                                     handleNoteClick(note);
                                 }
                             }}
@@ -169,7 +165,7 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
                                 position: 'absolute',
                                 left: `${CANVAS_WIDTH / 2}px`,
                                 top: '50%',
-                                cursor: isSelected ? 'default' : 'pointer',
+                                cursor: isSelected ? 'default' : (isDragging ? 'grabbing' : 'pointer'),
                                 userSelect: 'none',
                                 boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
                                 borderRadius: '16px',

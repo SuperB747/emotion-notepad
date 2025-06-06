@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Box, Paper, Typography, TextField, Button, IconButton } from '@mui/material';
 import { Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon } from '@mui/icons-material';
 import { NOTE_COLORS, Z_INDEX } from '../../constants/noteConstants';
@@ -17,7 +17,6 @@ interface NoteCardProps {
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSaveEdit: () => void;
-  onAnimationComplete?: () => void;
   formatDate: (date: any) => string;
 }
 
@@ -34,33 +33,8 @@ export const NoteCard = ({
   onStartEdit,
   onCancelEdit,
   onSaveEdit,
-  onAnimationComplete,
   formatDate,
 }: NoteCardProps) => {
-
-  const [currentView, setCurrentView] = useState(viewMode);
-
-  useEffect(() => {
-    if (viewMode === 'full') {
-      // 애니메이션이 끝난 후 view를 변경하기 위해 onAnimationComplete 콜백을 기다림
-      // onAnimationComplete가 호출되면 부모 컴포넌트에서 state가 변경되고, 
-      // 이 컴포넌트가 다시 렌더링되면서 currentView가 full로 바뀜.
-      // 여기서는 직접적인 타이머 대신 onAnimationComplete에 의존.
-      // NoteDisplay에서 onAnimationComplete를 호출하면 됨.
-    } else {
-      setCurrentView('summary');
-    }
-  }, [viewMode]);
-
-  useEffect(() => {
-    if (viewMode === 'full' && onAnimationComplete) {
-       // 실제 뷰 전환은 onAnimationComplete 콜백 이후에 이뤄져야 함
-       // 이 로직은 부모 컴포넌트로 이동
-    } else {
-        setCurrentView(viewMode);
-    }
-  }, [viewMode, onAnimationComplete]);
-
 
   const getBackgroundColor = () => {
     if (isEditing) {
@@ -69,7 +43,7 @@ export const NoteCard = ({
     return NOTE_COLORS[note.color || 'yellow']?.bg || NOTE_COLORS.yellow.bg;
   };
   
-  if (currentView === 'summary') {
+  if (viewMode === 'summary') {
     return (
         <Box sx={{ p: 2, width: '100%', height: '100%', overflow: 'hidden',
             display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
@@ -90,7 +64,6 @@ export const NoteCard = ({
         </Box>
     );
   }
-
 
   return (
     <Paper

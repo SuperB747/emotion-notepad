@@ -64,6 +64,11 @@ export const NoteList = () => {
     }
   }, [selectedNote, isEditing]);
 
+  useEffect(() => {
+    // When the selected note changes, exit editing mode.
+    setIsEditing(false);
+  }, [selectedNote]);
+
   const handleCreateFolderAndCloseDialog = () => {
     handleCreateFolder(newFolderName).then(() => showSnackbar('폴더가 생성되었습니다.')).catch(() => showSnackbar('폴더 생성에 실패했습니다.'));
     setIsNewFolderDialogOpen(false);
