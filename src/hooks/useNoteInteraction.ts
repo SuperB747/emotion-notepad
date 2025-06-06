@@ -1,88 +1,135 @@
-import { useState, useRef, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import type { Note, NotePosition } from '../types/noteTypes';
 import { Z_INDEX } from '../constants/noteConstants';
 
 export const useNoteInteraction = (
+    notes: Note[],
     selectedNote: Note | null,
-    backgroundNotes: Note[],
-    notePositions: Record<string, NotePosition>,
     setSelectedNote: (note: Note | null) => void,
-    setBackgroundNotes: (notes: Note[]) => void,
+    notePositions: Record<string, NotePosition>,
     setNotePositions: React.Dispatch<React.SetStateAction<Record<string, NotePosition>>>,
-    normalizeZIndices: () => void,
+    updateNoteInFirestore: (noteId: string, updates: Partial<Note>) => Promise<void>
 ) => {
-    const isDragging = useRef(false);
+    const [isDragging, setIsDragging] = useState(false);
 
-    const handleNoteSelect = (note: Note) => {
-        if (selectedNote?.id === note.id || isDragging.current) return;
+    const normalizeZIndices = useCallback(() => {
+        if (isDragging) return;
 
-        const isCurrentlyBackground = backgroundNotes.some(n => n.id === note.id);
-        if (isCurrentlyBackground) {
-            if (!selectedNote) return;
-            
-            const bgZIndexes = backgroundNotes
-                .filter(n => n.id !== note.id)
-                .map(n => notePositions[n.id]?.zIndex || 0);
-            const maxZ = Math.max(0, ...bgZIndexes);
-            const newZForOldMain = maxZ + 1;
-
-            const newBackgroundNotes = backgroundNotes.map(n => n.id === note.id ? selectedNote : n);
-            
-            const mainNoteOriginalPosition = notePositions[selectedNote.id] || { x: 0, y: 0, rotate: 0, zIndex: Z_INDEX.MAIN };
-            const backgroundNoteOriginalPosition = notePositions[note.id];
-            
-            setNotePositions(prev => ({
-                ...prev,
-                [selectedNote.id]: { ...backgroundNoteOriginalPosition, zIndex: newZForOldMain }, 
-                [note.id]: { ...mainNoteOriginalPosition, x: 0, y: 0, rotate: 0, zIndex: Z_INDEX.MAIN } 
-            }));
-            
-            setBackgroundNotes(newBackgroundNotes);
-            setSelectedNote(note);
-
-            if (newZForOldMain >= Z_INDEX.THRESHOLD) {
-                normalizeZIndices();
-            }
-
-        } else { // Selected from sidebar
-             if (selectedNote) {
-                const newBackgroundNotes = [...backgroundNotes, selectedNote];
-                setBackgroundNotes(newBackgroundNotes);
-            }
-            setSelectedNote(note);
-            setBackgroundNotes(backgroundNotes.filter(n => n.id !== note.id));
-        }
-    };
-
-    const handleDragStart = () => {
-        isDragging.current = true;
-    };
-
-    const handleDragEnd = (note: Note, point: { x: number; y: number }) => {
         setNotePositions(prev => {
-            const currentHighestZ = Math.max(0, ...Object.values(prev).map(p => p.zIndex || 0).filter(z => z < Z_INDEX.MAIN));
-            return {
-                ...prev,
-                [note.id]: {
-                    ...prev[note.id],
-                    x: point.x,
-                    y: point.y,
-                    zIndex: currentHighestZ + 1
-                }
+            const newPositions = { ...prev };
+            const backgroundNotes = Object.keys(newPositions)
+                .filter(id => newPositions[id].zIndex < Z_INDEX.MAIN)
+                .sort((a, b) => newPositions[a].zIndex - newPositions[b].zIndex);
+
+            backgroundNotes.forEach((id, index) => {
+                newPositions[id].zIndex = Z_INDEX.BACKGROUND + index;
+            });
+            
+            return newPositions;
+        });
+    }, [isDragging, setNotePositions]);
+
+    const handleNoteSelect = useCallback((noteToSelect: Note) => {
+        if (noteToSelect.id === selectedNote?.id) return;
+
+        setNotePositions(prev => {
+            const newPositions = { ...prev };
+            const currentSelectedId = selectedNote?.id;
+
+            if (!currentSelectedId || !newPositions[currentSelectedId] || !newPositions[noteToSelect.id]) {
+                return prev;
             }
+
+            const oldMainPos = newPositions[currentSelectedId];
+            const newBgPos = newPositions[noteToSelect.id];
+
+            // 1. 위치와 회전값을 교환합니다.
+            newPositions[currentSelectedId] = {
+                ...oldMainPos,
+                x: newBgPos.x,
+                y: newBgPos.y,
+                rotate: newBgPos.rotate,
+                zIndex: 0, // z-index는 아래에서 정규화됩니다.
+            };
+
+            newPositions[noteToSelect.id] = {
+                ...newBgPos,
+                x: oldMainPos.x,
+                y: oldMainPos.y,
+                rotate: oldMainPos.rotate,
+                zIndex: Z_INDEX.MAIN,
+            };
+
+            // 2. 단일 업데이트 내에서 모든 배경 노트의 z-index를 정규화합니다.
+            const backgroundNotes = Object.keys(newPositions)
+                .filter(id => id !== noteToSelect.id) 
+                .sort((a, b) => (prev[a]?.zIndex || 0) - (prev[b]?.zIndex || 0));
+
+            backgroundNotes.forEach((id, index) => {
+                newPositions[id].zIndex = Z_INDEX.BACKGROUND + index;
+            });
+            
+            return newPositions;
         });
 
-        // Use timeout to prevent click event from firing after drag
-        setTimeout(() => {
-            isDragging.current = false;
-        }, 100);
+        setSelectedNote(noteToSelect);
+    }, [selectedNote, setSelectedNote, setNotePositions]);
+
+    const handleDragStart = useCallback(() => {
+        setIsDragging(true);
+    }, []);
+
+    const handleDragEnd = useCallback(() => {
+        setIsDragging(false);
         normalizeZIndices();
-    };
+    }, [normalizeZIndices]);
+
+    const handleNoteDrag = useCallback((id: string, offset: { x: number; y: number }) => {
+        setNotePositions(prev => {
+            const currentPos = prev[id];
+            if (!currentPos) return prev;
+
+            const newX = currentPos.x + offset.x;
+            const newY = currentPos.y + offset.y;
+
+            const maxZ = Math.max(
+                Z_INDEX.BACKGROUND,
+                ...Object.entries(prev)
+                    .filter(([noteId]) => noteId !== id)
+                    .map(([, pos]) => pos.zIndex)
+                    .filter(z => z < Z_INDEX.MAIN)
+            );
+            const newZIndex = maxZ + 1;
+            
+            updateNoteInFirestore(id, { x: newX, y: newY, zIndex: newZIndex });
+
+            return {
+                ...prev,
+                [id]: {
+                    ...currentPos,
+                    x: newX,
+                    y: newY,
+                    zIndex: newZIndex,
+                }
+            };
+        });
+    }, [setNotePositions, updateNoteInFirestore]);
+
+
+    const handleNoteUpdate = useCallback(async (id: string, content: string) => {
+        try {
+            await updateNoteInFirestore(id, { content });
+        } catch (error) {
+            console.error('Error updating note:', error);
+        }
+    }, [updateNoteInFirestore]);
 
     return {
-        isDragging: isDragging.current,
+        isDragging,
         handleNoteSelect,
         handleDragStart,
-        handleDragEnd
+        handleDragEnd,
+        handleNoteDrag,
+        handleNoteUpdate,
     };
 };

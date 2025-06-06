@@ -65,23 +65,27 @@ export const useNoteData = () => {
     const unsubscribe = onSnapshot(notesQuery, (snapshot) => {
         const notesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Note));
         setNotes(notesList);
+
+        // Set initial selected note only if one isn't already selected
+        if (!selectedNote && notesList.length > 0) {
+          const firstNoteInFolder = notesList.find(n => currentFolderId ? n.folderId === currentFolderId : !n.folderId);
+          setSelectedNote(firstNoteInFolder || notesList[0]);
+        }
     });
     return () => unsubscribe();
   }, [user]);
 
-  // Logic to determine selected and background notes
+  // Logic to determine background notes based on the selected one
   useEffect(() => {
     const filteredNotes = notes.filter(note => {
         if (currentFolderId === 'all') return true;
         return currentFolderId ? note.folderId === currentFolderId : !note.folderId;
     });
 
-    if (selectedNote && filteredNotes.find(n => n.id === selectedNote.id)) {
-        setBackgroundNotes(filteredNotes.filter(n => n.id !== selectedNote.id));
+    if (selectedNote) {
+      setBackgroundNotes(filteredNotes.filter(n => n.id !== selectedNote.id));
     } else {
-        const newSelected = filteredNotes[0] || null;
-        setSelectedNote(newSelected);
-        setBackgroundNotes(newSelected ? filteredNotes.filter(n => n.id !== newSelected.id) : []);
+      setBackgroundNotes(filteredNotes);
     }
    }, [notes, currentFolderId, selectedNote]);
   

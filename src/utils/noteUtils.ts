@@ -36,11 +36,13 @@ export const getDistanceFromMainNote = (x: number, y: number): number => {
   const bgNoteTop = y - bgNoteHalfHeight;
   const bgNoteBottom = y + bgNoteHalfHeight;
 
+  // 메인 노트와 배경 노트가 겹치는 영역 계산
   const overlapLeft = Math.max(mainNoteLeft, bgNoteLeft);
   const overlapRight = Math.min(mainNoteRight, bgNoteRight);
   const overlapTop = Math.max(mainNoteTop, bgNoteTop);
   const overlapBottom = Math.min(mainNoteBottom, bgNoteBottom);
 
+  // 겹치는 영역이 있다면, 그 넓이를 계산하여 허용치를 넘는지 확인
   if (overlapLeft < overlapRight && overlapTop < overlapBottom) {
     const overlapWidth = overlapRight - overlapLeft;
     const overlapHeight = overlapBottom - overlapTop;
@@ -48,15 +50,17 @@ export const getDistanceFromMainNote = (x: number, y: number): number => {
     const bgNoteArea = bgNoteWidth * bgNoteHeight;
     const overlapPercent = (overlapArea / bgNoteArea) * 100;
 
+    // 겹치는 비율이 설정된 허용치보다 크면, 유효하지 않은 위치로 간주 (거리 0 반환)
     if (overlapPercent > LAYOUT.MAIN_NOTE_OVERLAP_PERCENT) {
-      return 0;
+      return 0; // 0은 '충돌' 또는 '유효하지 않음'을 의미
     }
   }
 
+  // 겹치지 않는 경우, 가장 가까운 모서리까지의 거리를 반환
   const dx = Math.max(mainNoteLeft - bgNoteRight, 0, bgNoteLeft - mainNoteRight);
   const dy = Math.max(mainNoteTop - bgNoteBottom, 0, bgNoteTop - mainNoteBottom);
   
-  return Math.sqrt(dx * dx + dy * dy);
+  return Math.sqrt(dx * dx + dy * dy) + (overlapLeft < overlapRight && overlapTop < overlapBottom ? 0.1 : 1);
 };
 
 // 화면 범위 체크
@@ -102,11 +106,12 @@ export const isPositionValid = (
     existingNotes: Note[],
     containerSize: { width: number; height: number }
 ): boolean => {
-  const distanceFromMain = getDistanceFromMainNote(x, y);
-  if (distanceFromMain === 0) {
+  // 메인 노트와 허용치 이상으로 겹치는지 확인
+  if (getDistanceFromMainNote(x, y) === 0) {
     return false;
   }
 
+  // 다른 배경 노트와 최소 거리 이상 떨어져 있는지 확인
   for (let i = 0; i < existingNotes.length; i++) {
     const otherNote = existingNotes[i];
     const pos = positions[otherNote.id];
@@ -139,45 +144,69 @@ export const generateRandomPosition = (
   containerSize: { width: number; height: number },
   maxAttempts: number = LAYOUT.PLACEMENT_ATTEMPTS
 ): { x: number; y: number; zIndex: number } => {
-  const sector = index % 8;
-  const baseAngle = (sector * Math.PI / 4) + (Math.random() * 0.2 - 0.1);
-  
   const maxScreenRadius = Math.min(
-    containerSize.width / 2 - LAYOUT.BACKGROUND_NOTE_WIDTH * LAYOUT.BASE_SCALE - LAYOUT.SAFE_MARGIN,
-    containerSize.height / 2 - LAYOUT.BACKGROUND_NOTE_HEIGHT * LAYOUT.BASE_SCALE - LAYOUT.SAFE_MARGIN
-  );
-
-  const effectiveMaxDistance = Math.min(LAYOUT.MAX_MAIN_NOTE_CLEARANCE, maxScreenRadius);
+    containerSize.width / 2 - LAYOUT.BACKGROUND_NOTE_WIDTH * LAYOUT.BASE_SCALE,
+    containerSize.height / 2 - LAYOUT.BACKGROUND_NOTE_HEIGHT * LAYOUT.BASE_SCALE
+  ) - LAYOUT.SAFE_MARGIN;
   
+  // 노트를 고르게 분포시키기 위해 8개의 섹터로 나눔
+  const sectorCount = 8;
+  const baseAngle = (index % sectorCount) * (2 * Math.PI / sectorCount);
+
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const minDistance = LAYOUT.MIN_MAIN_NOTE_CLEARANCE + LAYOUT.BACKGROUND_NOTE_WIDTH * LAYOUT.BASE_SCALE;
-    const distance = minDistance + Math.random() * (effectiveMaxDistance - minDistance);
+    const minRadius = (Math.max(LAYOUT.MAIN_NOTE_WIDTH, LAYOUT.MAIN_NOTE_HEIGHT) / 2) + LAYOUT.MIN_MAIN_NOTE_CLEARANCE;
+    const maxRadius = Math.min(maxScreenRadius, minRadius + LAYOUT.MAX_MAIN_NOTE_CLEARANCE);
+
+    const distance = minRadius + Math.random() * (maxRadius - minRadius);
     
-    const angleVariation = (Math.random() - 0.5) * Math.PI / 9;
+    // 각 섹터 내에서 약간의 무작위 각도 추가
+    const angleVariation = (Math.random() - 0.5) * (2 * Math.PI / sectorCount);
     const angle = baseAngle + angleVariation;
     
     let x = Math.cos(angle) * distance;
     let y = Math.sin(angle) * distance;
-
-    if (y < -LAYOUT.MAX_VERTICAL_OFFSET) {
-      y = -LAYOUT.MAX_VERTICAL_OFFSET;
-    }
     
-    y += 50;
+    // 메인 노트 위로 너무 올라가지 않도록 y 위치 제한
+    const yLimit = -(LAYOUT.MAIN_NOTE_HEIGHT / 2) - LAYOUT.MAX_Y_OFFSET_ABOVE_MAIN;
+    if (y < yLimit) {
+      y = yLimit;
+    }
 
     if (isPositionValid(x, y, positions, currentNote, existingNotes, containerSize)) {
       return { x, y, zIndex: index + 1 };
     }
   }
 
-  const safeDistance = LAYOUT.MIN_MAIN_NOTE_CLEARANCE + LAYOUT.BACKGROUND_NOTE_WIDTH * LAYOUT.BASE_SCALE + 
-    Math.random() * (effectiveMaxDistance - LAYOUT.MIN_MAIN_NOTE_CLEARANCE) * 0.8;
-  const safeAngle = baseAngle + (Math.random() - 0.5) * Math.PI / 12;
-  let x = Math.cos(safeAngle) * safeDistance;
-  let y = Math.sin(safeAngle) * safeDistance + 50;
+  // Fallback: 유효한 위치를 못 찾으면, 최소 반경에서 시작하여 각도를 조금씩 돌리면서 빈 공간을 찾음
+  let radius = (Math.max(LAYOUT.MAIN_NOTE_WIDTH, LAYOUT.MAIN_NOTE_HEIGHT) / 2) + LAYOUT.MIN_MAIN_NOTE_CLEARANCE;
+  for (let j = 0; j < 10; j++) { // 반경을 점차 늘려가며 시도
+    for (let i = 0; i < 36; i++) { // 10도씩 회전하며 검사
+      const angle = baseAngle + (i * 10 * Math.PI / 180);
+      
+      let x = Math.cos(angle) * radius;
+      let y = Math.sin(angle) * radius;
 
-  if (y < -LAYOUT.MAX_VERTICAL_OFFSET) {
-    y = -LAYOUT.MAX_VERTICAL_OFFSET;
+      const yLimit = -(LAYOUT.MAIN_NOTE_HEIGHT / 2) - LAYOUT.MAX_Y_OFFSET_ABOVE_MAIN;
+      if (y < yLimit) {
+        y = yLimit;
+      }
+
+      if (isPositionValid(x, y, positions, currentNote, existingNotes, containerSize)) {
+        return { x, y, zIndex: index + 1 };
+      }
+    }
+    radius += 20; // 반경을 20px 늘려서 다시 시도
+  }
+
+  // 최후의 수단: 그래도 유효한 위치를 찾지 못하면, 원래 계산된 각도의 최소 반경에 배치.
+  // 이 경우 일부 겹침이 발생할 수 있으나, 모든 노트가 배치되도록 보장함.
+  const finalRadius = (Math.max(LAYOUT.MAIN_NOTE_WIDTH, LAYOUT.MAIN_NOTE_HEIGHT) / 2) + LAYOUT.MIN_MAIN_NOTE_CLEARANCE;
+  const angle = baseAngle;
+  let x = Math.cos(angle) * finalRadius;
+  let y = Math.sin(angle) * finalRadius;
+  const yLimit = -(LAYOUT.MAIN_NOTE_HEIGHT / 2) - LAYOUT.MAX_Y_OFFSET_ABOVE_MAIN;
+  if (y < yLimit) {
+    y = yLimit;
   }
   
   return { x, y, zIndex: index + 1 };

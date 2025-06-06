@@ -66,14 +66,25 @@ export const NoteSidebar = ({
             onClick={() => onNoteSelect(note)}
             sx={{
               pl: 4,
+              py: 0.2,
               '&.Mui-selected': { bgcolor: 'rgba(158, 187, 166, 0.2)', '&:hover': { bgcolor: 'rgba(158, 187, 166, 0.3)' } },
             }}
           >
-            <ListItemIcon><NoteIcon /></ListItemIcon>
+            <ListItemIcon sx={{ minWidth: 32 }}><NoteIcon fontSize="small" /></ListItemIcon>
             <ListItemText
               primary={note.title}
               secondary={formatDate(note.createdAt)}
-              primaryTypographyProps={{ style: { fontWeight: selectedNote?.id === note.id ? 600 : 400, color: '#2c5530' } }}
+              primaryTypographyProps={{ 
+                style: { 
+                  fontWeight: selectedNote?.id === note.id ? 600 : 400, 
+                  color: '#2c5530', 
+                  fontSize: '0.8rem',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                } 
+              }}
+              secondaryTypographyProps={{ style: { fontSize: '0.7rem' } }}
             />
             <IconButton size="small" onClick={(e) => { e.stopPropagation(); onDeleteNote(note.id); }}>
               <DeleteIcon fontSize="small" />
@@ -88,7 +99,7 @@ export const NoteSidebar = ({
     <Paper 
       elevation={3} 
       sx={{ 
-        width: 280,
+        width: 320,
         height: '100vh',
         bgcolor: 'background.paper',
         borderRight: '1px solid rgba(0, 0, 0, 0.12)',
@@ -122,21 +133,21 @@ export const NoteSidebar = ({
         </IconButton>
       </Box>
 
-      <List sx={{ flex: 1, overflow: 'auto' }}>
-        <ListItemButton onClick={onNewFolderOpen}>
-          <ListItemIcon><CreateNewFolderIcon /></ListItemIcon>
-          <ListItemText primary="새 폴더 만들기" />
+      <List sx={{ flex: 1, overflow: 'auto', py: 0.5 }}>
+        <ListItemButton onClick={onNewFolderOpen} sx={{ py: 0.8 }}>
+          <ListItemIcon sx={{ minWidth: 32 }}><CreateNewFolderIcon fontSize="small"/></ListItemIcon>
+          <ListItemText primary="새 폴더 만들기" primaryTypographyProps={{ style: { fontSize: '0.85rem' } }}/>
         </ListItemButton>
 
         <ListItemButton
           selected={!currentFolderId}
           onClick={() => onFolderChange(null)}
-          sx={{ '&.Mui-selected': { bgcolor: 'rgba(158, 187, 166, 0.2)', '&:hover': { bgcolor: 'rgba(158, 187, 166, 0.3)' } } }}
+          sx={{ py: 0.8, '&.Mui-selected': { bgcolor: 'rgba(158, 187, 166, 0.2)', '&:hover': { bgcolor: 'rgba(158, 187, 166, 0.3)' } } }}
         >
-          <ListItemIcon><NoteIcon /></ListItemIcon>
+          <ListItemIcon sx={{ minWidth: 32 }}><NoteIcon fontSize="small"/></ListItemIcon>
           <ListItemText 
             primary="전체 노트"
-            primaryTypographyProps={{ style: { fontWeight: !currentFolderId ? 600 : 400, color: '#2c5530' } }}
+            primaryTypographyProps={{ style: { fontWeight: !currentFolderId ? 600 : 400, color: '#2c5530', fontSize: '0.85rem' } }}
           />
         </ListItemButton>
         <Collapse in={!currentFolderId || currentFolderId === null} timeout="auto" unmountOnExit>
@@ -147,12 +158,21 @@ export const NoteSidebar = ({
             <ListItemButton
               onClick={() => { onFolderToggle(folder.id); onFolderChange(folder.id); }}
               selected={currentFolderId === folder.id}
-              sx={{ '&.Mui-selected': { bgcolor: 'rgba(158, 187, 166, 0.2)', '&:hover': { bgcolor: 'rgba(158, 187, 166, 0.3)' } } }}
+              sx={{ py: 0.8, '&.Mui-selected': { bgcolor: 'rgba(158, 187, 166, 0.2)', '&:hover': { bgcolor: 'rgba(158, 187, 166, 0.3)' } } }}
             >
-              <ListItemIcon>{openFolders[folder.id] ? <FolderOpenIcon /> : <FolderIcon />}</ListItemIcon>
+              <ListItemIcon sx={{ minWidth: 32 }}>{openFolders[folder.id] ? <FolderOpenIcon fontSize="small"/> : <FolderIcon fontSize="small"/>}</ListItemIcon>
               <ListItemText 
                 primary={folder.name}
-                primaryTypographyProps={{ style: { fontWeight: currentFolderId === folder.id ? 600 : 400, color: '#2c5530' } }}
+                primaryTypographyProps={{ 
+                  style: { 
+                    fontWeight: currentFolderId === folder.id ? 600 : 400, 
+                    color: '#2c5530', 
+                    fontSize: '0.85rem',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }
+                }}
               />
               <IconButton size="small" onClick={(e) => { e.stopPropagation(); onDeleteFolder(folder.id); }}>
                 <DeleteIcon fontSize="small" />
@@ -167,13 +187,23 @@ export const NoteSidebar = ({
                       key={note.id}
                       selected={selectedNote?.id === note.id}
                       onClick={() => onNoteSelect(note)}
-                      sx={{ pl: 4, '&.Mui-selected': { bgcolor: 'rgba(158, 187, 166, 0.2)', '&:hover': { bgcolor: 'rgba(158, 187, 166, 0.3)' } } }}
+                      sx={{ pl: 4, py: 0.2, '&.Mui-selected': { bgcolor: 'rgba(158, 187, 166, 0.2)', '&:hover': { bgcolor: 'rgba(158, 187, 166, 0.3)' } } }}
                     >
-                      <ListItemIcon><NoteIcon /></ListItemIcon>
+                      <ListItemIcon sx={{ minWidth: 32 }}><NoteIcon fontSize="small" /></ListItemIcon>
                       <ListItemText 
                         primary={note.title}
                         secondary={formatDate(note.createdAt)}
-                        primaryTypographyProps={{ style: { fontWeight: selectedNote?.id === note.id ? 600 : 400, color: '#2c5530' } }}
+                        primaryTypographyProps={{ 
+                          style: { 
+                            fontWeight: selectedNote?.id === note.id ? 600 : 400, 
+                            color: '#2c5530', 
+                            fontSize: '0.8rem',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          } 
+                        }}
+                        secondaryTypographyProps={{ style: { fontSize: '0.7rem' } }}
                       />
                       <IconButton size="small" onClick={(e) => { e.stopPropagation(); onDeleteNote(note.id); }}>
                         <DeleteIcon fontSize="small" />

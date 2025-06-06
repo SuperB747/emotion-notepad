@@ -6,9 +6,10 @@ import { NOTE_COLORS } from '../../constants/noteConstants';
 interface NoteComponentProps {
     note: Note;
     isBackground?: boolean;
+    zIndex?: number;
 }
 
-export const NoteComponent: React.FC<NoteComponentProps> = ({ note, isBackground = false }) => {
+export const NoteComponent: React.FC<NoteComponentProps> = ({ note, isBackground = false, zIndex }) => {
     const titleFontSize = isBackground ? '1rem' : '1.25rem';
     const contentFontSize = isBackground ? '0.75rem' : '0.9rem';
     const padding = isBackground ? '0.8rem' : '1rem';
@@ -42,6 +43,11 @@ export const NoteComponent: React.FC<NoteComponentProps> = ({ note, isBackground
             }}>
                 {note.content}
             </Typography>
+            {isBackground && zIndex !== undefined && (
+                <Typography sx={{ position: 'absolute', bottom: 5, right: 8, fontSize: '0.6rem', color: 'rgba(0,0,0,0.4)' }}>
+                    z: {zIndex}
+                </Typography>
+            )}
         </div>
     );
 }; 

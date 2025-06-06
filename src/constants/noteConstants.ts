@@ -73,11 +73,23 @@ export const DRAG_THRESHOLD = 5;
 export const LAYOUT = {
   MAX_ROTATION: 5, // 최대 회전 각도
   SAFE_MARGIN: 150, // 화면 경계와의 최소 간격
-  MIN_DISTANCE: 250, // 노트 간 최소 거리
-  MIN_SAME_COLOR_DISTANCE: 350, // 같은 색상 노트 간 최소 거리
-  MIN_MAIN_NOTE_CLEARANCE: 100, // 메인 노트와의 최소 거리
-  MAX_MAIN_NOTE_CLEARANCE: 300, // 메인 노트와의 최대 거리
-  MAX_VERTICAL_OFFSET: 200, // 위쪽으로 최대 거리 제한
+
+  // --- 노트 간 거리 설정 (수동 조절 가능) ---
+  // 배경 노트끼리의 최소 거리입니다. 값이 클수록 더 멀리 떨어집니다.
+  MIN_DISTANCE: 200, 
+  // 같은 색상의 배경 노트끼리의 최소 거리입니다.
+  MIN_SAME_COLOR_DISTANCE: 250, 
+
+  // --- 메인 노트와 배경 노트의 관계 설정 (수동 조절 가능) ---
+  // 메인 노트와 배경 노트의 최소 간격입니다. (메인 노트 가장자리 기준)
+  MIN_MAIN_NOTE_CLEARANCE: 60, 
+  // 메인 노트와 배경 노트의 최대 간격입니다. 값이 클수록 더 멀리 퍼집니다.
+  MAX_MAIN_NOTE_CLEARANCE: 200, 
+  
+  // 메인 노트 위쪽으로 배경 노트가 올라갈 수 있는 최대 거리입니다.
+  // 값이 작을수록 더 적게 올라갑니다. (0에 가까울수록 메인 노트 상단에 가까워짐)
+  MAX_Y_OFFSET_ABOVE_MAIN: 30,
+
   PLACEMENT_ATTEMPTS: 40, // 시도 횟수
   BASE_SCALE: 0.65, // 배경 노트 기본 스케일
   HOVER_SCALE: 0.85, // 배경 노트 호버 스케일
@@ -87,5 +99,8 @@ export const LAYOUT = {
   BACKGROUND_NOTE_HEIGHT: 220, // 배경 노트 높이
   FRAME_WIDTH: 1200, // 노트 표시 프레임 너비
   FRAME_HEIGHT: 750, // 노트 표시 프레임 높이
-  MAIN_NOTE_OVERLAP_PERCENT: 30, // 메인 노트와 배경 노트가 겹칠 수 있는 최대 비율 (0-100)
+  
+  // 배경 노트가 메인 노트와 겹칠 수 있는 최대 비율 (0-100).
+  // 값이 클수록 더 많이 겹칠 수 있습니다. (예: 20은 20%를 의미)
+  MAIN_NOTE_OVERLAP_PERCENT: 30,
 } as const;

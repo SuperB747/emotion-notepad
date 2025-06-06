@@ -1,23 +1,27 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Box, Paper, Typography, CircularProgress, Switch, Button } from '@mui/material';
 import { motion } from 'framer-motion';
-import { Note, NotePosition, Folder, NoteColor } from '../../types/noteTypes';
-import { NoteComponent } from './NoteComponent';
+import type { Note, NotePosition, Folder, NoteColor } from '../../types/noteTypes';
 import { EmptyState } from '../Layout/EmptyState';
-import { Z_INDEX, LAYOUT } from '../../constants/noteConstants';
+import { Z_INDEX, LAYOUT, NOTE_COLORS } from '../../constants/noteConstants';
 import { NoteCard } from './NoteCard';
 import { Save, Check, Shuffle } from '@mui/icons-material';
+
+const NOTE_WIDTH = 220;
+const NOTE_HEIGHT = 180;
+const CANVAS_WIDTH = 1500;
+const MotionPaper = motion(Paper);
 
 interface NoteDisplayProps {
     notes: Note[];
     folders: Folder[];
     selectedNote: Note | null;
-    backgroundNotes: Note[];
     notePositions: Record<string, NotePosition>;
     currentFolderId: string | null;
     onNoteSelect: (note: Note) => void;
     onDragStart: () => void;
-    onDragEnd: (note: Note, point: { x: number; y: number }) => void;
+    onDragEnd: () => void;
+    onNoteDrag: (id: string, offset: { x: number; y: number }) => void;
     isDragging: boolean;
     isOCDMode: boolean;
     onOCDToggle: (checked: boolean) => void;
@@ -27,7 +31,6 @@ interface NoteDisplayProps {
     showSaveSuccess: boolean;
     currentFolderName: string;
     setContainerSize: (size: { width: number; height: number }) => void;
-    // Props for editing
     isEditing: boolean;
     editedTitle: string;
     editedContent: string;
@@ -41,20 +44,16 @@ interface NoteDisplayProps {
     formatDate: (date: any) => string;
 }
 
-const MotionPaper = motion(Paper);
-const NOTE_WIDTH = 220;
-const NOTE_HEIGHT = 180;
-
 export const NoteDisplay: React.FC<NoteDisplayProps> = ({
     notes,
     folders,
     selectedNote,
-    backgroundNotes,
     notePositions,
     isDragging,
     onNoteSelect,
     onDragStart,
     onDragEnd,
+    onNoteDrag,
     isOCDMode,
     onOCDToggle,
     onShuffle,
@@ -67,78 +66,21 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
     ...rest
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const [transitioningNoteId, setTransitioningNoteId] = useState<string | null>(null);
+    const wasDraggedRef = useRef(false);
 
     useEffect(() => {
         if (containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
             setContainerSize({ width: rect.width, height: rect.height });
+            containerRef.current.scrollLeft = (CANVAS_WIDTH - rect.width) / 2;
         }
     }, [setContainerSize]);
 
-    const renderBackgroundNotes = () => {
-        return backgroundNotes.map(note => {
-            const position = notePositions[note.id] || { x: 0, y: 0, zIndex: 1, rotate: 0 };
-            const rotation = isOCDMode ? 0 : position.rotate;
-
-            return (
-                <MotionPaper
-                    key={note.id}
-                    drag
-                    dragMomentum={false}
-                    onTap={() => onNoteSelect(note)}
-                    onDragStart={onDragStart}
-                    onDragEnd={(e, info) => {
-                        const startPosition = notePositions[note.id] || { x: 0, y: 0 };
-                        const x = startPosition.x + info.offset.x;
-                        const y = startPosition.y + info.offset.y;
-                        onDragEnd(note, { x, y });
-                    }}
-                    whileHover={{ scale: isDragging ? 1 : 1.05, zIndex: Z_INDEX.HOVER }}
-                    whileTap={{ cursor: 'grabbing', scale: 1.05, zIndex: Z_INDEX.DRAGGING }}
-                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                    style={{
-                        position: 'absolute',
-                        width: NOTE_WIDTH,
-                        height: NOTE_HEIGHT,
-                        cursor: 'grab',
-                        userSelect: 'none',
-                        borderRadius: '16px',
-                        left: '50%',
-                        top: '50%',
-                        x: position.x - NOTE_WIDTH / 2,
-                        y: position.y - NOTE_HEIGHT / 2,
-                    }}
-                    animate={{
-                        rotate: rotation,
-                        zIndex: position.zIndex,
-                        opacity: 0.85,
-                    }}
-                >
-                    <NoteComponent note={note} isBackground={true} />
-                </MotionPaper>
-            );
-        });
-    };
-
-    const renderSelectedNote = () => {
-        if (!selectedNote) {
-            return <EmptyState message="메모를 선택해주세요." />;
-        }
-        return (
-            <Box
-                sx={{
-                  position: 'absolute',
-                  width: `${LAYOUT.MAIN_NOTE_WIDTH}px`,
-                  height: `${LAYOUT.MAIN_NOTE_HEIGHT}px`,
-                  left: '50%',
-                  top: '50%',
-                  transform: 'translate(-50%, -50%)',
-                  zIndex: Z_INDEX.MAIN,
-                }}
-            >
-                <NoteCard note={selectedNote} {...rest} />
-            </Box>
-        );
+    const handleNoteClick = (note: Note) => {
+        if (note.id === selectedNote?.id) return;
+        setTransitioningNoteId(note.id);
+        onNoteSelect(note);
     };
 
     const renderNoteControls = () => (
@@ -159,7 +101,7 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
                 <Switch size="small" checked={isOCDMode} onChange={(e) => onOCDToggle(e.target.checked)} />
             </Box>
             <Box sx={{ height: '24px', width: '1px', bgcolor: 'rgba(0,0,0,0.1)' }} />
-            <Button size="small" onClick={onShuffle} startIcon={<Shuffle />}>섞기</Button>
+            <Button size="small" onClick={onShuffle} startIcon={<Shuffle />}>노트섞기</Button>
             <Box sx={{ height: '24px', width: '1px', bgcolor: 'rgba(0,0,0,0.1)' }} />
             <Button size="small" onClick={onSaveLayout} disabled={isLayoutSaving} startIcon={showSaveSuccess ? <Check /> : <Save />} sx={{ minWidth: '120px' }}>
                 {isLayoutSaving ? <CircularProgress size={14} /> : (showSaveSuccess ? '저장됨' : '레이아웃 저장')}
@@ -168,10 +110,90 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
     );
 
     return (
-        <Box ref={containerRef} sx={{ flexGrow: 1, position: 'relative', overflow: 'hidden' }}>
+        <Box 
+            ref={containerRef} 
+            sx={{ 
+                flexGrow: 1, 
+                position: 'relative', 
+                overflow: 'hidden',
+                background: 'radial-gradient(circle, #e0e0e0, #c0c0c0)',
+            }}
+        >
+            <Box sx={{ position: 'relative', width: CANVAS_WIDTH, height: '100%' }}>
+                {notes.length === 0 && <EmptyState message="노트를 추가해주세요." />}
+                {notes.map(note => {
+                    const isSelected = note.id === selectedNote?.id;
+                    const isTransitioning = note.id === transitioningNoteId;
+                    const position = notePositions[note.id];
+                    if (!position) return null;
+
+                    const width = isSelected ? LAYOUT.MAIN_NOTE_WIDTH : NOTE_WIDTH;
+                    const height = isSelected ? LAYOUT.MAIN_NOTE_HEIGHT : NOTE_HEIGHT;
+                    const x = isSelected ? -width / 2 : position.x - NOTE_WIDTH / 2;
+                    const y = isSelected ? -height / 2 : position.y - NOTE_HEIGHT / 2;
+                    
+                    const getBackgroundColor = () => {
+                        const colorKey = rest.isEditing && isSelected ? rest.editedColor : note.color || 'yellow';
+                        return NOTE_COLORS[colorKey]?.bg || NOTE_COLORS.yellow.bg;
+                    };
+                    
+                    return (
+                        <MotionPaper
+                            key={note.id}
+                            layout
+                            drag={!isSelected}
+                            dragMomentum={false}
+                            onDragStart={() => {
+                                onDragStart();
+                                wasDraggedRef.current = true;
+                            }}
+                            onDragEnd={(e, info) => {
+                                onNoteDrag(note.id, { x: info.offset.x, y: info.offset.y });
+                                onDragEnd();
+                                setTimeout(() => { wasDraggedRef.current = false; }, 0);
+                            }}
+                            onTap={() => {
+                                if (!wasDraggedRef.current) {
+                                    handleNoteClick(note);
+                                }
+                            }}
+                            onLayoutAnimationComplete={() => {
+                                if (isTransitioning) {
+                                    setTransitioningNoteId(null);
+                                }
+                            }}
+                            whileHover={!isSelected && !isDragging ? { scale: 1.05, zIndex: Z_INDEX.HOVER } : {}}
+                            whileTap={{ cursor: 'grabbing' }}
+                            transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+                            style={{
+                                position: 'absolute',
+                                left: `${CANVAS_WIDTH / 2}px`,
+                                top: '50%',
+                                cursor: isSelected ? 'default' : 'pointer',
+                                userSelect: 'none',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                                borderRadius: '16px',
+                            }}
+                            animate={{
+                                width,
+                                height,
+                                x,
+                                y,
+                                rotate: isSelected ? 0 : (isOCDMode ? 0 : position.rotate),
+                                zIndex: position.zIndex,
+                                background: getBackgroundColor(),
+                            }}
+                        >
+                            <NoteCard
+                                note={note}
+                                viewMode={isSelected && !isTransitioning ? 'full' : 'summary'}
+                                {...rest}
+                            />
+                        </MotionPaper>
+                    );
+                })}
+            </Box>
             {renderNoteControls()}
-            {renderBackgroundNotes()}
-            {renderSelectedNote()}
         </Box>
     );
 };

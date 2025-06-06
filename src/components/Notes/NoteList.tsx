@@ -9,39 +9,41 @@ import { useNoteData } from '../../hooks/useNoteData';
 import { useNoteLayout } from '../../hooks/useNoteLayout';
 import { useNoteInteraction } from '../../hooks/useNoteInteraction';
 import type { Note, NoteColor, NotePosition } from '../../types/noteTypes';
-import { NoteCard } from './NoteCard';
 
 export const NoteList = () => {
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const showSnackbar = (message: string) => setSnackbarMessage(message);
   const [containerSize, setContainerSize] = useState<{width: number, height: number} | null>(null);
+  const [notePositions, setNotePositions] = useState<Record<string, NotePosition>>({});
+  const [isOCDMode, setIsOCDMode] = useState(false);
 
   const {
     user, notes, folders, currentFolderId, selectedNote, backgroundNotes,
-    setCurrentFolderId, setSelectedNote, setBackgroundNotes,
+    setCurrentFolderId, setSelectedNote,
     handleLogout, handleCreateFolder, handleDeleteFolder, handleDeleteNote, handleNoteUpdate,
     formatDate
   } = useNoteData();
 
   const {
-    notePositions, isOCDMode, isLayoutSaving, showSaveSuccess,
-    setNotePositions, setIsOCDMode, saveFolderLayout, shuffleNotes, normalizeZIndices
-  } = useNoteLayout(user, notes, currentFolderId, folders, containerSize);
-
-  const {
     isDragging,
     handleNoteSelect,
     handleDragStart,
-    handleDragEnd
+    handleDragEnd,
+    handleNoteDrag,
+    handleNoteUpdate: handleInteractionNoteUpdate,
   } = useNoteInteraction(
+    notes,
     selectedNote,
-    backgroundNotes,
-    notePositions,
     setSelectedNote,
-    setBackgroundNotes,
+    notePositions,
     setNotePositions,
-    normalizeZIndices,
+    handleNoteUpdate,
   );
+  
+  const {
+    isLayoutSaving, showSaveSuccess, saveFolderLayout, shuffleNotes,
+  } = useNoteLayout(user, notes, currentFolderId, folders, notePositions, setNotePositions, isOCDMode, setIsOCDMode, containerSize, selectedNote, setSelectedNote);
+
 
   const [isNewFolderDialogOpen, setIsNewFolderDialogOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -125,7 +127,6 @@ export const NoteList = () => {
         notes={notes}
         folders={folders}
         selectedNote={selectedNote}
-        backgroundNotes={backgroundNotes}
         notePositions={notePositions}
         currentFolderId={currentFolderId}
         isOCDMode={isOCDMode}
@@ -133,11 +134,12 @@ export const NoteList = () => {
         showSaveSuccess={showSaveSuccess}
         isDragging={isDragging}
         onOCDToggle={setIsOCDMode}
-        onShuffle={() => shuffleNotes()}
+        onShuffle={shuffleNotes}
         onSaveLayout={saveFolderLayout}
         onNoteSelect={handleNoteSelect}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
+        onNoteDrag={handleNoteDrag}
         isEditing={isEditing}
         editedTitle={editedTitle}
         editedContent={editedContent}
