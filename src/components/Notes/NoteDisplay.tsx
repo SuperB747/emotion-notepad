@@ -140,19 +140,18 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
                         <MotionPaper
                             key={note.id}
                             layout
-                            drag={!isSelected}
+                            drag
                             dragMomentum={false}
                             onDragStart={onDragStart}
                             onDragEnd={(e, info) => {
-                                if (containerRef.current) {
-                                    const containerRect = containerRef.current.getBoundingClientRect();
-                                    const newX = info.point.x - containerRect.left - (CANVAS_WIDTH / 2);
-                                    const newY = info.point.y - containerRect.top - (containerRect.height / 2);
-                                    onNoteDrag(note.id, { x: newX, y: newY });
+                                const wasDragged = Math.abs(info.offset.x) > 2 || Math.abs(info.offset.y) > 2;
+                                if (wasDragged) {
+                                    onNoteDrag(note.id, { x: info.offset.x, y: info.offset.y });
+                                } else {
+                                    handleNoteClick(note);
                                 }
                                 onDragEnd();
                             }}
-                            onTap={() => handleNoteClick(note)}
                             onLayoutAnimationComplete={() => {
                                 if (isTransitioning) {
                                     setTransitioningNoteId(null);
@@ -165,7 +164,7 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
                                 position: 'absolute',
                                 left: `${CANVAS_WIDTH / 2}px`,
                                 top: '50%',
-                                cursor: isSelected ? 'default' : 'pointer',
+                                cursor: isSelected ? 'default' : (isDragging ? 'grabbing' : 'pointer'),
                                 userSelect: 'none',
                                 boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
                                 borderRadius: '16px',

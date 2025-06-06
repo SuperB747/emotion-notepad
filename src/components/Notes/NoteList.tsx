@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Fab, Snackbar } from '@mui/material';
 import { Add as AddIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ import { useNoteData } from '../../hooks/useNoteData';
 import { useNoteLayout } from '../../hooks/useNoteLayout';
 import { useNoteInteraction } from '../../hooks/useNoteInteraction';
 import type { Note, NoteColor, NotePosition } from '../../types/noteTypes';
+import { Z_INDEX } from '../../constants/noteConstants';
 
 export const NoteList = () => {
   const [snackbarMessage, setSnackbarMessage] = useState('');
@@ -16,6 +17,7 @@ export const NoteList = () => {
   const [containerSize, setContainerSize] = useState<{width: number, height: number} | null>(null);
   const [notePositions, setNotePositions] = useState<Record<string, NotePosition>>({});
   const [isOCDMode, setIsOCDMode] = useState(false);
+  const previousSelectedNoteId = useRef<string | null>(null);
 
   const {
     user, notes, folders, currentFolderId, selectedNote, backgroundNotes,
@@ -44,6 +46,52 @@ export const NoteList = () => {
     isLayoutSaving, showSaveSuccess, saveFolderLayout, shuffleNotes,
   } = useNoteLayout(user, notes, currentFolderId, folders, notePositions, setNotePositions, isOCDMode, setIsOCDMode, containerSize, selectedNote, setSelectedNote);
 
+  useEffect(() => {
+    if (selectedNote) {
+        if (previousSelectedNoteId.current && previousSelectedNoteId.current !== selectedNote.id) {
+            handleSwapPositions(previousSelectedNoteId.current, selectedNote.id);
+        }
+        previousSelectedNoteId.current = selectedNote.id;
+    }
+  }, [selectedNote]);
+
+  const handleSwapPositions = (fromNoteId: string, toNoteId: string) => {
+    setNotePositions(prev => {
+        const newPositions = { ...prev };
+        const fromPos = newPositions[fromNoteId];
+        const toPos = newPositions[toNoteId];
+
+        if (!fromPos || !toPos) {
+            return prev;
+        }
+
+        newPositions[fromNoteId] = {
+            ...fromPos,
+            x: toPos.x,
+            y: toPos.y,
+            rotate: toPos.rotate,
+            zIndex: 0,
+        };
+
+        newPositions[toNoteId] = {
+            ...toPos,
+            x: fromPos.x,
+            y: fromPos.y,
+            rotate: fromPos.rotate,
+            zIndex: Z_INDEX.MAIN,
+        };
+
+        const backgroundNotes = Object.keys(newPositions)
+            .filter(id => id !== toNoteId)
+            .sort((a, b) => (prev[a]?.zIndex || 0) - (prev[b]?.zIndex || 0));
+
+        backgroundNotes.forEach((id, index) => {
+            newPositions[id].zIndex = Z_INDEX.BACKGROUND + index;
+        });
+        
+        return newPositions;
+    });
+  };
 
   const [isNewFolderDialogOpen, setIsNewFolderDialogOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
