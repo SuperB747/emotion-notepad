@@ -84,14 +84,11 @@ export const useNoteInteraction = (
         normalizeZIndices();
     }, [normalizeZIndices]);
 
-    const handleNoteDrag = useCallback((id: string, offset: { x: number; y: number }) => {
+    const handleNoteDrag = useCallback((id: string, point: { x: number; y: number }) => {
         setNotePositions(prev => {
             const currentPos = prev[id];
             if (!currentPos) return prev;
-
-            const newX = currentPos.x + offset.x;
-            const newY = currentPos.y + offset.y;
-
+            
             const maxZ = Math.max(
                 Z_INDEX.BACKGROUND,
                 ...Object.entries(prev)
@@ -100,15 +97,15 @@ export const useNoteInteraction = (
                     .filter(z => z < Z_INDEX.MAIN)
             );
             const newZIndex = maxZ + 1;
-            
-            updateNoteInFirestore(id, { x: newX, y: newY, zIndex: newZIndex });
+
+            updateNoteInFirestore(id, { x: point.x, y: point.y, zIndex: newZIndex });
 
             return {
                 ...prev,
                 [id]: {
                     ...currentPos,
-                    x: newX,
-                    y: newY,
+                    x: point.x,
+                    y: point.y,
                     zIndex: newZIndex,
                 }
             };
