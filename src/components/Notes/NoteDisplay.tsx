@@ -19,7 +19,7 @@ interface NoteDisplayProps {
     notePositions: Record<string, NotePosition>;
     currentFolderId: string | null;
     onNoteSelect: (note: Note) => void;
-    onDragStart: () => void;
+    onDragStart: (id: string) => void;
     onDragEnd: () => void;
     onNoteDrag: (id: string, offset: { x: number; y: number }) => void;
     isDragging: boolean;
@@ -67,6 +67,9 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [transitioningNoteId, setTransitioningNoteId] = useState<string | null>(null);
+    const [localDragging, setLocalDragging] = useState(false);
+    const dragStartTimeRef = useRef<number>(0);
+    const draggedNoteRef = useRef<string | null>(null);
 
     useEffect(() => {
         if (containerRef.current) {
@@ -77,10 +80,26 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
     }, [setContainerSize]);
 
     const handleNoteClick = (note: Note) => {
-        if (note.id === selectedNote?.id) return;
+        if (note.id === selectedNote?.id || localDragging) return;
+        
+        // 드래그 중이었던 노트는 클릭 이벤트 무시
+        if (draggedNoteRef.current === note.id) {
+            draggedNoteRef.current = null;
+            return;
+        }
+        
         setTransitioningNoteId(note.id);
         onNoteSelect(note);
     };
+
+    useEffect(() => {
+        if (selectedNote && transitioningNoteId) {
+            const timer = setTimeout(() => {
+                setTransitioningNoteId(null);
+            }, 300); // 애니메이션이 완료되기를 기다립니다
+            return () => clearTimeout(timer);
+        }
+    }, [selectedNote, transitioningNoteId]);
 
     const renderNoteControls = () => (
         <Box sx={{
@@ -140,21 +159,35 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
                         <MotionPaper
                             key={note.id}
                             layout
-                            drag
+                            drag={!isSelected}
                             dragMomentum={false}
-                            onDragStart={onDragStart}
-                            onDragEnd={(e, info) => {
-                                const wasDragged = Math.abs(info.offset.x) > 2 || Math.abs(info.offset.y) > 2;
-                                if (wasDragged) {
-                                    onNoteDrag(note.id, { x: info.offset.x, y: info.offset.y });
-                                } else {
-                                    handleNoteClick(note);
+                            dragElastic={0}
+                            onDragStart={() => {
+                                dragStartTimeRef.current = Date.now();
+                                draggedNoteRef.current = note.id;
+                                onDragStart(note.id);
+                            }}
+                            onDrag={(e, info) => {
+                                if (Math.abs(info.offset.x) > 3 || Math.abs(info.offset.y) > 3) {
+                                    setLocalDragging(true);
                                 }
+                            }}
+                            onDragEnd={(e, info) => {
+                                if (localDragging && !isSelected) {
+                                    onNoteDrag(note.id, { x: info.offset.x, y: info.offset.y });
+                                }
+                                setLocalDragging(false);
                                 onDragEnd();
                             }}
-                            onLayoutAnimationComplete={() => {
-                                if (isTransitioning) {
-                                    setTransitioningNoteId(null);
+                            onTap={() => {
+                                // 드래그 중이었던 노트는 탭 이벤트 무시
+                                if (draggedNoteRef.current === note.id) {
+                                    draggedNoteRef.current = null;
+                                    return;
+                                }
+                                
+                                if (!localDragging && !isDragging && !isSelected && !transitioningNoteId) {
+                                    handleNoteClick(note);
                                 }
                             }}
                             whileHover={!isSelected && !isDragging ? { scale: 1.05, zIndex: Z_INDEX.HOVER } : {}}
@@ -181,7 +214,7 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
                         >
                             <NoteCard
                                 note={note}
-                                viewMode={isSelected && !isTransitioning ? 'full' : 'summary'}
+                                viewMode={isSelected ? 'full' : 'summary'}
                                 {...rest}
                             />
                         </MotionPaper>

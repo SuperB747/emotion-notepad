@@ -31,20 +31,24 @@ export const useNoteLayout = (
     if (notesInCurrentFolder.length === 0) return;
 
     let mainNote = notesInCurrentFolder.find(n => n.id === selectedNote?.id);
-    if (!mainNote) {
-        mainNote = notesInCurrentFolder[0];
+    if (!mainNote && selectedNote) {
+        mainNote = selectedNote;
     }
     
     const allNewPositions: Record<string, NotePosition> = {};
-    const backgroundNotes = notesInCurrentFolder.filter(note => note.id !== mainNote!.id);
+    const backgroundNotes = mainNote 
+        ? notesInCurrentFolder.filter(note => note.id !== mainNote.id)
+        : notesInCurrentFolder;
 
-    // 메인 노트 위치 설정
-    allNewPositions[mainNote.id] = {
-        x: 0,
-        y: 0,
-        rotate: isOCDMode ? 0 : (Math.random() - 0.5) * 10,
-        zIndex: Z_INDEX.MAIN,
-    };
+    // 메인 노트가 있을 때만 메인 노트 위치 설정
+    if (mainNote) {
+        allNewPositions[mainNote.id] = {
+            x: 0,
+            y: 0,
+            rotate: isOCDMode ? 0 : (Math.random() - 0.5) * 10,
+            zIndex: Z_INDEX.MAIN,
+        };
+    }
 
     // 배경 노트 위치 및 정수 z-index 설정
     backgroundNotes.forEach((note, index) => {
@@ -57,9 +61,7 @@ export const useNoteLayout = (
     });
 
     setNotePositions(allNewPositions);
-    setSelectedNote(mainNote);
-
-  }, [containerSize, notes, currentFolderId, isOCDMode, setNotePositions, selectedNote, setSelectedNote]);
+  }, [containerSize, notes, currentFolderId, isOCDMode, setNotePositions, selectedNote]);
 
   useEffect(() => {
     const loadLayout = async () => {

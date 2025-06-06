@@ -66,10 +66,11 @@ export const useNoteData = () => {
         const notesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Note));
         setNotes(notesList);
 
-        // Set initial selected note only if one isn't already selected
-        if (!selectedNote && notesList.length > 0) {
+        // 최초 로딩 시에만 선택된 노트 설정 (페이지가 처음 로드될 때만)
+        if (!selectedNote && notesList.length > 0 && !document.hidden && !localStorage.getItem('hasInitialLoad')) {
           const firstNoteInFolder = notesList.find(n => currentFolderId ? n.folderId === currentFolderId : !n.folderId);
           setSelectedNote(firstNoteInFolder || notesList[0]);
+          localStorage.setItem('hasInitialLoad', 'true');
         }
     });
     return () => unsubscribe();
@@ -83,11 +84,31 @@ export const useNoteData = () => {
     });
 
     if (selectedNote) {
-      setBackgroundNotes(filteredNotes.filter(n => n.id !== selectedNote.id));
+      // 선택된 노트가 현재 폴더에 속하지 않으면 선택 해제
+      const isSelectedNoteInCurrentFolder = currentFolderId === 'all' || 
+        (currentFolderId ? selectedNote.folderId === currentFolderId : !selectedNote.folderId);
+      
+      if (!isSelectedNoteInCurrentFolder) {
+        setSelectedNote(null);
+        setBackgroundNotes(filteredNotes);
+      } else {
+        setBackgroundNotes(filteredNotes.filter(n => n.id !== selectedNote.id));
+      }
     } else {
       setBackgroundNotes(filteredNotes);
     }
    }, [notes, currentFolderId, selectedNote]);
+
+  // 페이지 언로드 시 localStorage 초기화
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      localStorage.removeItem('hasInitialLoad');
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
   
 
   const handleLogout = () => {

@@ -3,6 +3,10 @@ import { Box, Paper, Typography, TextField, Button, IconButton } from '@mui/mate
 import { Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon } from '@mui/icons-material';
 import { NOTE_COLORS, Z_INDEX } from '../../constants/noteConstants';
 import type { Note, NoteColor } from '../../types/noteTypes';
+import { motion } from 'framer-motion';
+
+const MotionBox = motion(Box);
+const MotionTypography = motion(Typography);
 
 interface NoteCardProps {
   note: Note;
@@ -45,23 +49,45 @@ export const NoteCard = ({
   
   if (viewMode === 'summary') {
     return (
-        <Box sx={{ p: 2, width: '100%', height: '100%', overflow: 'hidden',
-            display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-            <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, textAlign: 'center' }}>
+        <MotionBox 
+            layout
+            sx={{ 
+                p: 2, 
+                width: '100%', 
+                height: '100%', 
+                overflow: 'hidden',
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center', 
+                alignItems: 'center' 
+            }}
+            transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+        >
+            <MotionTypography 
+                layout
+                variant="h6" 
+                sx={{ fontWeight: 'bold', mb: 1, textAlign: 'center' }}
+                transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+            >
                 {note.title}
-            </Typography>
-            <Typography variant="body2" sx={{ 
-                overflow: 'hidden', 
-                textOverflow: 'ellipsis',
-                display: '-webkit-box',
-                '-webkit-line-clamp': 3,
-                '-webkit-box-orient': 'vertical',
-                textAlign: 'center',
-                opacity: 0.7
-             }}>
+            </MotionTypography>
+            <MotionTypography 
+                layout
+                variant="body2" 
+                sx={{ 
+                    overflow: 'hidden', 
+                    textOverflow: 'ellipsis',
+                    display: '-webkit-box',
+                    '-webkit-line-clamp': 3,
+                    '-webkit-box-orient': 'vertical',
+                    textAlign: 'center',
+                    opacity: 0.7
+                }}
+                transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+            >
                 {note.content}
-            </Typography>
-        </Box>
+            </MotionTypography>
+        </MotionBox>
     );
   }
 
@@ -97,7 +123,11 @@ export const NoteCard = ({
       <Typography sx={{ position: 'absolute', top: 5, right: 8, fontSize: '0.6rem', color: 'rgba(0,0,0,0.4)' }}>
         z: {Z_INDEX.MAIN}
       </Typography>
-      <Box sx={{ position: 'relative', zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <MotionBox 
+        layout
+        sx={{ position: 'relative', zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column' }}
+        transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+      >
         {isEditing ? (
           <>
             <TextField
@@ -155,45 +185,69 @@ export const NoteCard = ({
           </>
         ) : (
           <>
-            <Box sx={{ position: 'relative', mb: 2, textAlign: 'center' }}>
-              <Typography variant="h4" sx={{ color: '#2c5530', fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif", fontWeight: 'bold', fontSize: '1.6rem' }}>
+            <MotionBox layout sx={{ position: 'relative', mb: 2, textAlign: 'center' }}>
+              <MotionTypography 
+                layout
+                variant="h4" 
+                sx={{ color: '#2c5530', fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif", fontWeight: 'bold', fontSize: '1.6rem' }}
+                transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+              >
                 {note.title}
-              </Typography>
-            </Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="caption" sx={{ color: '#666', fontStyle: 'italic' }}>
+              </MotionTypography>
+            </MotionBox>
+            <MotionBox layout sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <MotionTypography 
+                layout
+                variant="caption" 
+                sx={{ color: '#666', fontStyle: 'italic' }}
+                transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+              >
                 {note.createdAt ? formatDate(note.createdAt) : ''}
-              </Typography>
+              </MotionTypography>
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <IconButton onClick={onStartEdit} size="small" sx={{ color: '#9cbb9c', p: 0.5 }}><EditIcon fontSize="small" /></IconButton>
               </Box>
-            </Box>
-            <Box sx={{ 
-              flex: 1, 
-              overflowY: 'auto',
-              pr: 1,
-              '&::-webkit-scrollbar': {
-                width: '8px',
-              },
-              '&::-webkit-scrollbar-track': {
-                background: 'rgba(0,0,0,0.1)',
-                borderRadius: '4px',
-              },
-              '&::-webkit-scrollbar-thumb': {
-                background: 'rgba(0,0,0,0.3)',
-                borderRadius: '4px',
-              },
-              '&::-webkit-scrollbar-thumb:hover': {
-                background: 'rgba(0,0,0,0.5)',
-              }
-            }}>
-              <Typography sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, color: '#444', fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif", fontSize: '1.1rem' }}>
+            </MotionBox>
+            <MotionBox 
+              layout
+              sx={{ 
+                flex: 1, 
+                overflowY: 'auto',
+                pr: 1,
+                '&::-webkit-scrollbar': {
+                  width: '8px',
+                },
+                '&::-webkit-scrollbar-track': {
+                  background: 'rgba(0,0,0,0.1)',
+                  borderRadius: '4px',
+                },
+                '&::-webkit-scrollbar-thumb': {
+                  background: 'rgba(0,0,0,0.3)',
+                  borderRadius: '4px',
+                },
+                '&::-webkit-scrollbar-thumb:hover': {
+                  background: 'rgba(0,0,0,0.5)',
+                }
+              }}
+              transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+            >
+              <MotionTypography 
+                layout
+                sx={{ 
+                  whiteSpace: 'pre-wrap', 
+                  lineHeight: 1.8, 
+                  color: '#444', 
+                  fontFamily: "'Ghibli', 'Noto Sans KR', sans-serif", 
+                  fontSize: '1.1rem' 
+                }}
+                transition={{ type: 'spring', stiffness: 200, damping: 25 }}
+              >
                 {note.content}
-              </Typography>
-            </Box>
+              </MotionTypography>
+            </MotionBox>
           </>
         )}
-      </Box>
+      </MotionBox>
     </Paper>
   );
 };
