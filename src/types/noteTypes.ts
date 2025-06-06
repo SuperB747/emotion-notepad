@@ -34,8 +34,8 @@ export interface NotePosition {
 
 export interface FolderLayout {
   id: string;
-  positions: Record<string, NotePosition>;
   isOCDMode: boolean;
   folderName: string | null;
   updatedAt?: any;
+  positions: Record<string, any>;
 }

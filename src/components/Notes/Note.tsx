@@ -1,41 +1,33 @@
-const Note = ({ note, isBackground = false }: NoteProps) => {
+import React from 'react';
+import { Paper, Typography } from '@mui/material';
+import type { Note as NoteType } from '../../types/noteTypes';
+import { NOTE_COLORS } from '../../constants/noteConstants';
+
+interface NoteProps {
+  note: NoteType;
+  onClick?: () => void;
+}
+
+const Note: React.FC<NoteProps> = ({ note, onClick }) => {
   const noteStyle = {
-    backgroundColor: getBackgroundColor(note.color),
-    color: getTextColor(note.color),
+    backgroundColor: NOTE_COLORS[note.color || 'yellow'].bg,
     padding: '20px',
     borderRadius: '8px',
-    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-    width: isBackground ? '200px' : '100%',
-    height: isBackground ? '200px' : '100%',
-    overflow: 'hidden',
-    position: 'relative' as const,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
     cursor: 'pointer',
-  };
-
-  const contentStyle = {
-    fontSize: isBackground ? '0.8em' : '1em',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    display: '-webkit-box',
-    WebkitLineClamp: isBackground ? 3 : 'none',
-    WebkitBoxOrient: 'vertical' as const,
-    wordBreak: 'break-word' as const,
+    transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
+    '&:hover': {
+      transform: 'translateY(-2px)',
+      boxShadow: '0 4px 8px rgba(0, 0, 0, 0.15)',
+    }
   };
 
   return (
-    <div style={noteStyle}>
-      <h3 style={{ 
-        margin: '0 0 10px 0',
-        fontSize: isBackground ? '1em' : '1.2em',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap'
-      }}>
-        {note.title}
-      </h3>
-      <div style={contentStyle}>
-        {note.content}
-      </div>
-    </div>
+    <Paper sx={noteStyle} onClick={onClick}>
+      <Typography variant="h6" sx={{ mb: 1 }}>{note.title}</Typography>
+      <Typography noWrap>{note.content}</Typography>
+    </Paper>
   );
-}; 
+};
+
+export default Note; 
