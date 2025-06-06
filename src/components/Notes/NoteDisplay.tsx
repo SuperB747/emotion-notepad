@@ -215,6 +215,7 @@ export const NoteDisplay: React.FC<NoteDisplayProps> = ({
                             <NoteCard
                                 note={note}
                                 viewMode={isSelected ? 'full' : 'summary'}
+                                notePosition={notePositions[note.id]}
                                 {...rest}
                             />
                         </MotionPaper>

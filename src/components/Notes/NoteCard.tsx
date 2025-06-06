@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Paper, Typography, TextField, Button, IconButton } from '@mui/material';
 import { Edit as EditIcon, Save as SaveIcon, Cancel as CancelIcon } from '@mui/icons-material';
 import { NOTE_COLORS, Z_INDEX } from '../../constants/noteConstants';
-import type { Note, NoteColor } from '../../types/noteTypes';
+import type { Note, NoteColor, NotePosition } from '../../types/noteTypes';
 import { motion } from 'framer-motion';
 
 const MotionBox = motion(Box);
@@ -15,6 +15,7 @@ interface NoteCardProps {
   editedTitle: string;
   editedContent: string;
   editedColor: NoteColor;
+  notePosition?: NotePosition;
   onEditTitle: (value: string) => void;
   onEditContent: (value: string) => void;
   onEditColor: (color: NoteColor) => void;
@@ -31,6 +32,7 @@ export const NoteCard = ({
   editedTitle,
   editedContent,
   editedColor,
+  notePosition,
   onEditTitle,
   onEditContent,
   onEditColor,
@@ -58,15 +60,36 @@ export const NoteCard = ({
                 overflow: 'hidden',
                 display: 'flex', 
                 flexDirection: 'column', 
-                justifyContent: 'center', 
-                alignItems: 'center' 
+                justifyContent: 'flex-start',
+                opacity: 0.80,
+                '&:hover': {
+                    opacity: 1,
+                },
+                position: 'relative',
             }}
             transition={{ type: 'spring', stiffness: 200, damping: 25 }}
         >
+            <Typography 
+                sx={{ 
+                    position: 'absolute', 
+                    top: 5, 
+                    right: 8, 
+                    fontSize: '0.6rem', 
+                    color: 'rgba(0,0,0,0.4)',
+                    pointerEvents: 'none',
+                }}
+            >
+                z: {notePosition?.zIndex || 0}
+            </Typography>
             <MotionTypography 
                 layout
                 variant="h6" 
-                sx={{ fontWeight: 'bold', mb: 1, textAlign: 'center' }}
+                sx={{ 
+                    fontWeight: 'bold', 
+                    mb: 1.5,
+                    fontSize: '1.1rem',
+                    color: '#2c5530',
+                }}
                 transition={{ type: 'spring', stiffness: 200, damping: 25 }}
             >
                 {note.title}
@@ -78,10 +101,12 @@ export const NoteCard = ({
                     overflow: 'hidden', 
                     textOverflow: 'ellipsis',
                     display: '-webkit-box',
-                    '-webkit-line-clamp': 3,
+                    '-webkit-line-clamp': 4,
                     '-webkit-box-orient': 'vertical',
-                    textAlign: 'center',
-                    opacity: 0.7
+                    lineHeight: 1.6,
+                    fontSize: '0.9rem',
+                    color: '#444',
+                    opacity: 0.9,
                 }}
                 transition={{ type: 'spring', stiffness: 200, damping: 25 }}
             >
@@ -102,10 +127,11 @@ export const NoteCard = ({
         bgcolor: getBackgroundColor(),
         borderRadius: '16px',
         boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-        transition: 'background-color 0.3s',
+        transition: 'all 0.3s',
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
+        opacity: 1,
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -120,7 +146,7 @@ export const NoteCard = ({
         },
       }}
     >
-      <Typography sx={{ position: 'absolute', top: 5, right: 8, fontSize: '0.6rem', color: 'rgba(0,0,0,0.4)' }}>
+      <Typography sx={{ position: 'absolute', top: 5, right: 8, fontSize: '0.6rem', color: 'rgba(0,0,0,0.4)', pointerEvents: 'none' }}>
         z: {Z_INDEX.MAIN}
       </Typography>
       <MotionBox 
